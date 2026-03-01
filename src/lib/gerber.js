@@ -527,23 +527,21 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
       // B.Cu: render SMD pad matrix under adapter area
       // Unconnected pads on 1.27mm grid for hand-soldering
       // 0805/1206 components like bypass caps and pull-up resistors.
-      // Matrix avoids TH pin columns (left/right edges) but extends
-      // one row above and below the adapter for extra space.
       const smdPadSize = SMD_PAD_SIZE;
       const smdGridPitch = SMD_PAD_GRID;
       const key = `${smdPadSize.toFixed(4)},${smdPadSize.toFixed(4)}`;
       if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
       const aperture = rectApertures.get(key);
-
-      // X range: skip the TH pin columns (col 0 and col max), use inner area only
-      const leftThCol = 0;
-      const rightThCol = Math.max(...adapter.throughPins.map(p => p.col));
-      const startX = originX + (leftThCol + 1) * pitch;
-      const endX   = originX + (rightThCol - 1) * pitch;
-
-      // Y range
+      
+      // Fill the entire adapter rectangle with SMD pads,
+      // filtering out any position too close to a TH drill hole.
+      // This works correctly for all adapter shapes and rotations.
+      const startX = originX;
+      const endX   = originX + (adapter.widthPins - 1) * pitch;
       const startY = originY;
       const endY   = originY + (adapter.heightPins - 1) * pitch;
+
+      const thKeepout = 1.4; // mm clearance around each TH hole
 
       for (let sx = startX; sx <= endX; sx += smdGridPitch) {
         for (let sy = startY; sy <= endY; sy += smdGridPitch) {
@@ -554,7 +552,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
           for (const pin of adapter.throughPins) {
             const tx = originX + pin.col * pitch;
             const ty = originY + pin.row * pitch;
-            if (Math.abs(rx - tx) < smdPadSize && Math.abs(ry - ty) < smdPadSize) {
+            if (Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout) {
               tooClose = true;
               break;
             }
@@ -595,8 +593,8 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
     gerber += `X${fmtCoord(pad.x)}Y${fmtCoord(pad.y)}D03*\n`;
   }
 
-  // Draw power rail traces
-  if (traces.length > 0) {
+  // Draw power rail traces (top layer only – easier to cut with a knife)
+  if (isTopLayer && traces.length > 0) {
     gerber += `D20*\n`;
     for (const t of traces) {
       gerber += `X${fmtCoord(t.x1)}Y${fmtCoord(t.y1)}D02*\n`;
@@ -672,17 +670,12 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
       if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
       const aperture = rectApertures.get(key);
 
-      const leftThCol = 0;
-      const rightThCol = Math.max(...adapter.throughPins.map(p => p.col));
-      //const startX = originX + (leftThCol + 1) * pitch - pitch / 2;
-      //const endX   = originX + (rightThCol - 1) * pitch + pitch / 2;
-      //const startY = originY - pitch + 0.5;
-      //const endY   = originY + (adapter.heightPins - 1) * pitch + pitch - 0.5;
-
-      const startX = originX + (leftThCol + 1) * pitch;
-      const endX   = originX + (rightThCol - 1) * pitch;
+      const startX = originX;
+      const endX   = originX + (adapter.widthPins - 1) * pitch;
       const startY = originY;
       const endY   = originY + (adapter.heightPins - 1) * pitch;
+
+      const thKeepout = 1.4;
 
       for (let sx = startX; sx <= endX; sx += smdGridPitch) {        
         for (let sy = startY; sy <= endY; sy += smdGridPitch) {
@@ -692,7 +685,7 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
           for (const pin of adapter.throughPins) {
             const tx = originX + pin.col * pitch;
             const ty = originY + pin.row * pitch;
-            if (Math.abs(rx - tx) < smdPadSize && Math.abs(ry - ty) < smdPadSize) {
+            if (Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout) {
               tooClose = true;
               break;
             }
