@@ -121,6 +121,11 @@ function addModule() {
   function removeAdapter(instanceId) {
     adapters = adapters.filter(a => a.id !== instanceId);
   }
+
+  function clearAll() {
+    adapters = [];
+    modules = [];
+  }
 </script>
 
 <div class="module-toolbar">
@@ -166,21 +171,26 @@ function addModule() {
   <!-- Placed items -->
   {#if modules.length > 0 || adapters.length > 0}
     <div class="section-divider"></div>
-    <div class="placed-list">
-      {#each adapters as inst (inst.id)}
-        <span class="placed-tag adapter-tag" style="border-color: {inst.color}">
-          ⚡ {inst.name}
-          <button class="rotate-btn" onclick={() => rotateAdapter(inst.id)} title="Rotate 90°">↻</button>
-          <button class="remove-btn" onclick={() => removeAdapter(inst.id)} title="Remove">×</button>
-        </span>
-      {/each}
-      {#each modules as inst (inst.id)}
-        <span class="placed-tag" style="border-color: {inst.color}">
-          {inst.name}
-          <button class="rotate-btn" onclick={() => rotateModule(inst.id)} title="Rotate 90°">↻</button>
-          <button class="remove-btn" onclick={() => removeModule(inst.id)} title="Remove">×</button>
-        </span>
-      {/each}
+    <div class="placing-toolbar">
+      <div class="placed-list">
+        {#each adapters as inst (inst.id)}
+          <span class="placed-tag adapter-tag" style="border-color: {inst.color}">
+            ⚡ {inst.name}
+            <button class="rotate-btn" onclick={() => rotateAdapter(inst.id)} title="Rotate 90°">↻</button>
+            <button class="remove-btn" onclick={() => removeAdapter(inst.id)} title="Remove">×</button>
+          </span>
+        {/each}
+        {#each modules as inst (inst.id)}
+          <span class="placed-tag" style="border-color: {inst.color}">
+            {inst.name}
+            <button class="rotate-btn" onclick={() => rotateModule(inst.id)} title="Rotate 90°">↻</button>
+            <button class="remove-btn" onclick={() => removeModule(inst.id)} title="Remove">×</button>
+          </span>
+        {/each}      
+      </div>
+      <div>
+        <button class="place-btn clear-btn" onclick={clearAll}>Clear All</button>
+      </div>
     </div>
   {/if}
 
@@ -264,6 +274,18 @@ function addModule() {
     color: #1e1e2e;
   }
   .adapter-place-btn:hover { background: #f2d68a; }
+
+  .clear-btn {
+    background: #e24f4f;
+    color: #1e1e2e;
+  }
+  .clear-btn:hover { background: #e72626; }
+
+  .placing-toolbar {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+  }
 
   .placed-list {
     display: flex;
