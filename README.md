@@ -14,9 +14,11 @@ Gerber files for ordering at JLCPCB, PCBWay, Aisler, etc.
 │   │   ├── main.js          ← Entry point
 │   │   ├── components/
 │   │   │   ├── Controls.svelte   ← Parameter controls
+│   │   │   ├── ...
 │   │   │   └── Preview.svelte    ← Live SVG preview
 │   │   └── lib/
 │   │       ├── gerber.js    ← Gerber RS-274X generator
+│   │       ├── ...
 │   │       └── zip.js       ← ZIP download utility
 │   ├── vite.config.js       ← Build config (library mode)
 │   └── package.json
@@ -44,7 +46,7 @@ Opens at `http://localhost:5173` with hot reload.
 ```bash
 npm run build
 ```
-Outputs `macgizmo-gridgen.js` and `style-xyz.css`
+Outputs `gridgen.js` and `gridgen.css`
 into `/dist`.
 
 
@@ -52,7 +54,9 @@ into `/dist`.
 - [x] Rectangular board, free dimensions
 - [x] Grid pitch: 2.54mm, 2.0mm
 - [x] Power rails (VCC/GND) on any edge
-- [x] Live SVG preview
+- [x] Row and column numbering
+- [x] Live SVG preview 
+- [x] Place and move typical dev module placeholders for size estimation
 - [x] Gerber RS-274X export (Edge.Cuts, F.Cu, B.Cu, F.Mask, B.Mask, Silkscreen)
 - [x] Excellon drill file
 - [x] ZIP download

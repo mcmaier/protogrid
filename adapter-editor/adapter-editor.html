@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GridGen Adapter Editor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; overflow: hidden; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useCallback, useEffect, useMemo } = React;
+
+const GRID = 2.54;
+const COLORS = {
+  bg: "#1a1a2e", gridDot: "#334", gridDotTH: "#f08040", gridDotTHInner: "#a04020",
+  smdPad: "#e8a030", smdPadStroke: "#c08020", trace: "#40d8d8", tracePreview: "#40d8d880",
+  silk: "#e8e8e8", origin: "#ff4060", highlight: "#ffe040", panelBg: "#16213e",
+  panelBorder: "#0f3460", accent: "#e94560", text: "#e0e0e0", textDim: "#888",
+  btnBg: "#0f3460", inputBg: "#1a1a2e",
+};
+
+const DEFAULT_ADAPTER = {
+  id: "soic8", name: "SOIC-8", category: "SOIC",
+  widthPins: 4, heightPins: 4,
+  originOffset: { x: 0, y: 0 },
+  smdPads: [], traces: [], throughPins: [], silkBody: null,
+};
+
+function parseKicadMod(text) {
+  const pads = [], silkLines = [];
+  let bodyPoly = null, m;
+  const padRegex = /\(pad\s+"(\d+)"\s+smd\s+\w+\s*\n?\s*\(at\s+([-\d.]+)\s+([-\d.]+)\)\s*\n?\s*\(size\s+([-\d.]+)\s+([-\d.]+)\)/g;
+  while ((m = padRegex.exec(text)) !== null) {
+    pads.push({ pin: parseInt(m[1]), x: parseFloat(m[2]), y: parseFloat(m[3]), w: parseFloat(m[4]), h: parseFloat(m[5]) });
+  }
+  const fabPolyRegex = /\(fp_poly\s*\n?\s*\(pts\s*\n?\s*([\s\S]*?)\)[\s\S]*?\(layer\s+"F\.Fab"\)/;
+  const polyMatch = fabPolyRegex.exec(text);
+  if (polyMatch) {
+    const ptRegex = /\(xy\s+([-\d.]+)\s+([-\d.]+)\)/g;
+    const points = [];
+    while ((m = ptRegex.exec(polyMatch[1])) !== null) points.push({ x: parseFloat(m[1]), y: parseFloat(m[2]) });
+    if (points.length > 2) bodyPoly = points;
+  }
+  return { pads, silkLines, bodyPoly };
+}
+
+function roundTo(val, dec = 4) { return Math.round(val * 10 ** dec) / 10 ** dec; }
+
+const ZOOM_LEVELS = [6, 8, 10, 14, 18, 24, 32, 40, 50];
+
+function AdapterEditor() {
+  const [adapter, setAdapter] = useState(DEFAULT_ADAPTER);
+  const [zoom, setZoom] = useState(4);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [tool, setTool] = useState("select");
+  const [tracePoints, setTracePoints] = useState([]);
+  const [traceWidth, setTraceWidth] = useState(0.3);
+  const [mousePos, setMousePos] = useState(null);
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [snapSmall, setSnapSmall] = useState(true);
+  const [selectedTrace, setSelectedTrace] = useState(null);
+  const [selectedPad, setSelectedPad] = useState(null);
+  const [showCode, setShowCode] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [maskExpansion, setMaskExpansion] = useState(0.05);
+  const svgRef = useRef(null);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const pxPerMm = ZOOM_LEVELS[zoom] || 18;
+
+  const toScreen = useCallback((x, y) => ({
+    sx: x * pxPerMm + panOffset.x,
+    sy: -y * pxPerMm + panOffset.y,
+  }), [pxPerMm, panOffset]);
+
+  const toWorld = useCallback((sx, sy) => ({
+    x: roundTo((sx - panOffset.x) / pxPerMm, 3),
+    y: roundTo(-(sy - panOffset.y) / pxPerMm, 3),
+  }), [pxPerMm, panOffset]);
+
+  const snapWorld = useCallback((wx, wy) => {
+    if (snapToGrid) return { x: roundTo(Math.round(wx / GRID) * GRID, 4), y: roundTo(Math.round(wy / GRID) * GRID, 4) };
+    if (snapSmall) { const s = 0.127; return { x: roundTo(Math.round(wx / s) * s, 4), y: roundTo(Math.round(wy / s) * s, 4) }; }
+    return { x: roundTo(wx, 3), y: roundTo(wy, 3) };
+  }, [snapToGrid, snapSmall]);
+
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    setZoom(z => Math.max(0, Math.min(ZOOM_LEVELS.length - 1, z + (e.deltaY > 0 ? -1 : 1))));
+  }, []);
+
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
+
+  const handleMouseDown = (e) => {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      isPanning.current = true;
+      panStart.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+      e.preventDefault();
+    }
+  };
+
+  const handleMouseMove = (e) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    if (isPanning.current) { setPanOffset({ x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y }); return; }
+    const w = toWorld(sx, sy);
+    setMousePos({ screen: { sx, sy }, world: w, snapped: snapWorld(w.x, w.y) });
+  };
+
+  const handleMouseUp = () => { isPanning.current = false; };
+
+  const finishTrace = useCallback(() => {
+    if (tracePoints.length >= 2) {
+      const segments = [];
+      for (let i = 0; i < tracePoints.length - 1; i++) {
+        segments.push({ x1: tracePoints[i].x, y1: tracePoints[i].y, x2: tracePoints[i + 1].x, y2: tracePoints[i + 1].y, w: traceWidth });
+      }
+      setAdapter(a => ({ ...a, traces: [...a.traces, { segments }] }));
+    }
+    setTracePoints([]);
+  }, [tracePoints, traceWidth]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === "Escape") { setTracePoints([]); setTool("select"); }
+    else if (e.key === "Enter") finishTrace();
+    else if (e.key === "Delete" || e.key === "Backspace") {
+      if (selectedTrace !== null) { setAdapter(a => ({ ...a, traces: a.traces.filter((_, i) => i !== selectedTrace) })); setSelectedTrace(null); }
+    }
+    else if (e.key === "t") setTool(t => t === "trace" ? "select" : "trace");
+    else if (e.key === "g") { setSnapToGrid(s => !s); setSnapSmall(false); }
+    else if (e.key === "s") { setSnapSmall(s => !s); setSnapToGrid(false); }
+    else if (e.key === "z" && e.ctrlKey) setAdapter(a => ({ ...a, traces: a.traces.slice(0, -1) }));
+  }, [finishTrace, selectedTrace]);
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
+  useEffect(() => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const cx = (adapter.widthPins - 1) * GRID / 2;
+    const cy = (adapter.heightPins - 1) * GRID / 2;
+    setPanOffset({ x: rect.width / 2 - cx * pxPerMm, y: rect.height / 2 + cy * pxPerMm });
+  }, [adapter.widthPins, adapter.heightPins, pxPerMm]);
+
+  const doImport = () => {
+    const parsed = parseKicadMod(importText);
+    if (parsed.pads.length === 0) return;
+    const pads = parsed.pads.map(p => ({ pin: p.pin, x: roundTo(p.x, 3), y: roundTo(-p.y, 3), w: roundTo(p.w, 3), h: roundTo(p.h, 3) }));
+    const body = parsed.bodyPoly ? parsed.bodyPoly.map(p => ({ x: roundTo(p.x, 3), y: roundTo(-p.y, 3) })) : null;
+    setAdapter(a => ({ ...a, smdPads: pads, silkBody: body, traces: [] }));
+    setShowImport(false);
+  };
+
+  const handleFileImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => { setImportText(ev.target.result); };
+    reader.readAsText(file);
+  };
+
+  const generateCode = useMemo(() => {
+    const { id, name, category, widthPins, heightPins, smdPads, traces, throughPins, originOffset, silkBody } = adapter;
+    const ox = originOffset.x, oy = originOffset.y;
+    let c = `  {\n    id: '${id}',\n    name: '${name}',\n    category: '${category}',\n    pitch: 2.54,\n    color: '#a060c0',\n\n`;
+    c += `    throughPins: [\n`;
+    throughPins.forEach(tp => { c += `      { col: ${tp.col}, row: ${tp.row}, label: '${tp.label}' },\n`; });
+    c += `    ],\n\n    features: {\n      copper: [\n        // SMD pads\n`;
+    smdPads.forEach(p => { c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${p.w}, h: ${p.h} },   // Pin ${p.pin}\n`; });
+    c += `\n        // Fanout traces\n`;
+    traces.forEach(t => { t.segments.forEach(s => { c += `        { type: 'trace', x1: ${roundTo(s.x1, 4)}, y1: ${roundTo(s.y1, 4)}, x2: ${roundTo(s.x2, 4)}, y2: ${roundTo(s.y2, 4)}, w: ${s.w} },\n`; }); });
+    c += `      ],\n      mask: [\n`;
+    smdPads.forEach(p => { c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${roundTo(p.w + maskExpansion * 2, 4)}, h: ${roundTo(p.h + maskExpansion * 2, 4)} },\n`; });
+    c += `      ],\n      silk: [\n`;
+    if (silkBody && silkBody.length > 2) {
+      c += `        { type: 'poly', points: [\n`;
+      silkBody.forEach(pt => { c += `          { x: ${roundTo(pt.x + ox, 4)}, y: ${roundTo(pt.y + oy, 4)} },\n`; });
+      c += `          { x: ${roundTo(silkBody[0].x + ox, 4)}, y: ${roundTo(silkBody[0].y + oy, 4)} },\n        ]},\n`;
+    }
+    if (smdPads.length > 0) {
+      const p1 = smdPads[0];
+      c += `        { type: 'circle', x: ${roundTo(p1.x + ox - 0.3, 4)}, y: ${roundTo(p1.y + oy + 0.5, 4)}, d: 0.25 },\n`;
+    }
+    c += `      ],\n    },\n\n`;
+    c += `    outline: { width: ${roundTo((widthPins - 1) * GRID + 2, 1)}, height: ${roundTo((heightPins - 1) * GRID + 2, 1)} },\n`;
+    c += `    outlineOffset: { x: 0, y: 0 },\n    widthPins: ${widthPins},\n    heightPins: ${heightPins},\n  },`;
+    return c;
+  }, [adapter, maskExpansion]);
+
+  const gridDots = [];
+  for (let c = 0; c < adapter.widthPins; c++)
+    for (let r = 0; r < adapter.heightPins; r++)
+      gridDots.push({ x: c * GRID, y: r * GRID, col: c, row: r });
+
+  const inputStyle = { background: COLORS.inputBg, border: `1px solid ${COLORS.panelBorder}`, color: COLORS.text, padding: "2px 4px", borderRadius: 2, fontSize: 11, fontFamily: "inherit" };
+  const btnStyle = { background: COLORS.btnBg, color: COLORS.text, border: "none", padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: "inherit" };
+
+  return (
+    React.createElement("div", { style: { display: "flex", height: "100vh", background: COLORS.bg, color: COLORS.text, fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace", fontSize: 12 } },
+
+      // Left Panel
+      React.createElement("div", { style: { width: 280, borderRight: `1px solid ${COLORS.panelBorder}`, background: COLORS.panelBg, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 } },
+        React.createElement("h2", { style: { margin: 0, fontSize: 14, color: COLORS.accent, letterSpacing: 1 } }, "⚡ ADAPTER EDITOR"),
+
+        // Adapter config
+        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "ADAPTER"),
+          React.createElement("div", { style: { display: "grid", gridTemplateColumns: "50px 1fr", gap: 4, alignItems: "center" } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "ID"),
+            React.createElement("input", { value: adapter.id, onChange: e => setAdapter(a => ({ ...a, id: e.target.value })), style: inputStyle }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Name"),
+            React.createElement("input", { value: adapter.name, onChange: e => setAdapter(a => ({ ...a, name: e.target.value })), style: inputStyle }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Cat."),
+            React.createElement("input", { value: adapter.category, onChange: e => setAdapter(a => ({ ...a, category: e.target.value })), style: inputStyle }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Grid"),
+            React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+              React.createElement("input", { type: "number", min: 1, max: 20, value: adapter.widthPins, onChange: e => setAdapter(a => ({ ...a, widthPins: parseInt(e.target.value) || 1 })), style: { ...inputStyle, width: 40 } }),
+              React.createElement("span", { style: { color: COLORS.textDim } }, "×"),
+              React.createElement("input", { type: "number", min: 1, max: 20, value: adapter.heightPins, onChange: e => setAdapter(a => ({ ...a, heightPins: parseInt(e.target.value) || 1 })), style: { ...inputStyle, width: 40 } }),
+            ),
+          ),
+        ),
+
+        // Origin offset
+        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "ORIGIN OFFSET (mm)"),
+          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "X"),
+            React.createElement("input", { type: "number", step: 0.01, value: adapter.originOffset.x, onChange: e => setAdapter(a => ({ ...a, originOffset: { ...a.originOffset, x: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: 64 } }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Y"),
+            React.createElement("input", { type: "number", step: 0.01, value: adapter.originOffset.y, onChange: e => setAdapter(a => ({ ...a, originOffset: { ...a.originOffset, y: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: 64 } }),
+          ),
+          React.createElement("div", { style: { marginTop: 4, fontSize: 10, color: COLORS.textDim } }, "Shifts KiCad center → adapter origin"),
+        ),
+
+        // TH Pins
+        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "TH PINS (click grid dots)"),
+          React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 2 } },
+            adapter.throughPins.map((tp, i) =>
+              React.createElement("span", { key: i, style: { background: COLORS.btnBg, padding: "1px 4px", borderRadius: 2, fontSize: 10, cursor: "pointer" }, onClick: () => setAdapter(a => ({ ...a, throughPins: a.throughPins.filter((_, j) => j !== i) })) },
+                `${tp.label}@(${tp.col},${tp.row}) ×`
+              )
+            ),
+          ),
+        ),
+
+        // Tools
+        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "TOOLS"),
+          React.createElement("div", { style: { display: "flex", gap: 4 } },
+            React.createElement("button", { onClick: () => { setTool("select"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "select" ? COLORS.accent : COLORS.btnBg } }, "Select"),
+            React.createElement("button", { onClick: () => { setTool("trace"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "trace" ? COLORS.accent : COLORS.btnBg } }, "Trace (T)"),
+          ),
+          tool === "trace" && React.createElement("div", { style: { marginTop: 6 } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Width: "),
+            React.createElement("input", { type: "number", step: 0.05, min: 0.1, max: 1.0, value: traceWidth, onChange: e => setTraceWidth(parseFloat(e.target.value) || 0.3), style: { ...inputStyle, width: 50 } }),
+            React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim } }, " mm"),
+            React.createElement("div", { style: { fontSize: 9, color: COLORS.textDim, marginTop: 4 } }, "Click → Enter to finish, Esc to cancel"),
+          ),
+          React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } },
+            React.createElement("label", { style: { fontSize: 10, display: "flex", gap: 3, alignItems: "center", cursor: "pointer" } },
+              React.createElement("input", { type: "checkbox", checked: snapToGrid, onChange: () => { setSnapToGrid(!snapToGrid); setSnapSmall(false); } }), "2.54mm (G)"
+            ),
+            React.createElement("label", { style: { fontSize: 10, display: "flex", gap: 3, alignItems: "center", cursor: "pointer" } },
+              React.createElement("input", { type: "checkbox", checked: snapSmall, onChange: () => { setSnapSmall(!snapSmall); setSnapToGrid(false); } }), "0.127mm (S)"
+            ),
+          ),
+        ),
+
+        // Import
+        React.createElement("button", { onClick: () => setShowImport(!showImport), style: { ...btnStyle, padding: "6px 8px", fontSize: 11, border: `1px solid ${COLORS.panelBorder}` } }, "📁 Import .kicad_mod"),
+        showImport && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
+          React.createElement("input", { type: "file", accept: ".kicad_mod", onChange: handleFileImport, style: { fontSize: 10, color: COLORS.textDim } }),
+          React.createElement("textarea", { value: importText, onChange: e => setImportText(e.target.value), placeholder: "...or paste content", rows: 4, style: { ...inputStyle, fontSize: 10, resize: "vertical" } }),
+          React.createElement("button", { onClick: doImport, style: { ...btnStyle, background: COLORS.accent, color: "#fff" } }, "Import Pads"),
+        ),
+
+        // Export
+        React.createElement("button", { onClick: () => setShowCode(!showCode), style: { ...btnStyle, background: COLORS.accent, color: "#fff", padding: "6px 8px", fontSize: 11 } }, showCode ? "Hide Code" : "📋 Export JS Code"),
+
+        // Mask expansion
+        React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
+          React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Mask exp:"),
+          React.createElement("input", { type: "number", step: 0.01, min: 0, max: 0.2, value: maskExpansion, onChange: e => setMaskExpansion(parseFloat(e.target.value) || 0.05), style: { ...inputStyle, width: 50 } }),
+          React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim } }, "mm"),
+        ),
+
+        // Selected pad info
+        selectedPad !== null && adapter.smdPads[selectedPad] && React.createElement("fieldset", { style: { border: `1px solid ${COLORS.accent}`, padding: 8, borderRadius: 4 } },
+          React.createElement("legend", { style: { color: COLORS.accent, fontSize: 10 } }, `PAD ${adapter.smdPads[selectedPad].pin}`),
+          React.createElement("div", { style: { fontSize: 10, lineHeight: 1.6 } },
+            `Pos: (${adapter.smdPads[selectedPad].x}, ${adapter.smdPads[selectedPad].y})`,
+            React.createElement("br"),
+            `Size: ${adapter.smdPads[selectedPad].w} × ${adapter.smdPads[selectedPad].h} mm`,
+            React.createElement("br"),
+            `Export: (${roundTo(adapter.smdPads[selectedPad].x + adapter.originOffset.x, 4)}, ${roundTo(adapter.smdPads[selectedPad].y + adapter.originOffset.y, 4)})`,
+          ),
+        ),
+
+        // Status bar
+        React.createElement("div", { style: { fontSize: 10, color: COLORS.textDim, marginTop: "auto" } },
+          mousePos && React.createElement(React.Fragment, null,
+            `World: (${mousePos.world.x.toFixed(3)}, ${mousePos.world.y.toFixed(3)})`, React.createElement("br"),
+            `Snap: (${mousePos.snapped.x.toFixed(3)}, ${mousePos.snapped.y.toFixed(3)})`, React.createElement("br"),
+          ),
+          `Pads: ${adapter.smdPads.length} | Traces: ${adapter.traces.length} | TH: ${adapter.throughPins.length}`,
+        ),
+      ),
+
+      // SVG Canvas
+      React.createElement("div", { style: { flex: 1, position: "relative", overflow: "hidden" } },
+        React.createElement("svg", {
+          ref: svgRef,
+          style: { width: "100%", height: "100%", cursor: tool === "trace" ? "crosshair" : "default" },
+          onMouseDown: handleMouseDown, onMouseMove: handleMouseMove, onMouseUp: handleMouseUp, onMouseLeave: handleMouseUp,
+          onClick: (e) => {
+            if (isPanning.current) return;
+            const rect = svgRef.current.getBoundingClientRect();
+            const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+            const w = toWorld(sx, sy), snapped = snapWorld(w.x, w.y);
+
+            if (tool === "select" && !e.altKey) {
+              const col = Math.round(w.x / GRID), row = Math.round(w.y / GRID);
+              if (col >= 0 && col < adapter.widthPins && row >= 0 && row < adapter.heightPins) {
+                const dist = Math.sqrt((w.x - col * GRID) ** 2 + (w.y - row * GRID) ** 2);
+                if (dist < 0.8) {
+                  const idx = adapter.throughPins.findIndex(tp => tp.col === col && tp.row === row);
+                  if (idx >= 0) setAdapter(a => ({ ...a, throughPins: a.throughPins.filter((_, i) => i !== idx) }));
+                  else setAdapter(a => ({ ...a, throughPins: [...a.throughPins, { col, row, label: String(a.throughPins.length + 1) }] }));
+                  return;
+                }
+              }
+              setSelectedTrace(null); setSelectedPad(null);
+              for (let i = 0; i < adapter.smdPads.length; i++) {
+                const p = adapter.smdPads[i];
+                if (Math.abs(w.x - p.x) < p.w / 2 + 0.3 && Math.abs(w.y - p.y) < p.h / 2 + 0.3) { setSelectedPad(i); return; }
+              }
+              for (let i = 0; i < adapter.traces.length; i++) {
+                for (const s of adapter.traces[i].segments) {
+                  const mx = (s.x1 + s.x2) / 2, my = (s.y1 + s.y2) / 2;
+                  if (Math.abs(w.x - mx) < 0.8 && Math.abs(w.y - my) < 0.8) { setSelectedTrace(i); return; }
+                }
+              }
+            } else if (tool === "trace") {
+              setTracePoints(pts => [...pts, snapped]);
+            }
+          },
+        },
+          React.createElement("rect", { width: "100%", height: "100%", fill: COLORS.bg }),
+
+          // Grid boundary
+          (() => {
+            const tl = toScreen(0, (adapter.heightPins - 1) * GRID);
+            const br = toScreen((adapter.widthPins - 1) * GRID, 0);
+            return React.createElement("rect", { x: tl.sx - 6, y: tl.sy - 6, width: br.sx - tl.sx + 12, height: br.sy - tl.sy + 12, fill: "none", stroke: COLORS.panelBorder, strokeWidth: 1, strokeDasharray: "4 4", rx: 4 });
+          })(),
+
+          // Grid dots + TH pins
+          gridDots.map((d, i) => {
+            const { sx, sy } = toScreen(d.x, d.y);
+            const isTH = adapter.throughPins.some(tp => tp.col === d.col && tp.row === d.row);
+            const label = adapter.throughPins.find(tp => tp.col === d.col && tp.row === d.row)?.label;
+            return React.createElement("g", { key: i },
+              isTH ? React.createElement(React.Fragment, null,
+                React.createElement("circle", { cx: sx, cy: sy, r: 0.8 * pxPerMm, fill: COLORS.gridDotTH }),
+                React.createElement("circle", { cx: sx, cy: sy, r: 0.5 * pxPerMm, fill: COLORS.gridDotTHInner }),
+                React.createElement("text", { x: sx, y: sy + 0.25 * pxPerMm, textAnchor: "middle", fill: "#fff", fontSize: Math.max(0.45 * pxPerMm, 8), fontFamily: "monospace", style: { pointerEvents: "none" } }, label),
+              ) : React.createElement("circle", { cx: sx, cy: sy, r: 3, fill: COLORS.gridDot }),
+            );
+          }),
+
+          // SMD Pads
+          adapter.smdPads.map((p, i) => {
+            const { sx, sy } = toScreen(p.x + adapter.originOffset.x, p.y + adapter.originOffset.y);
+            const w = p.w * pxPerMm, h = p.h * pxPerMm;
+            return React.createElement("g", { key: `p${i}` },
+              React.createElement("rect", { x: sx - w / 2, y: sy - h / 2, width: w, height: h, fill: COLORS.smdPad, stroke: selectedPad === i ? COLORS.highlight : COLORS.smdPadStroke, strokeWidth: selectedPad === i ? 2 : 0.5, rx: 1 }),
+              React.createElement("text", { x: sx, y: sy + 0.15 * pxPerMm, textAnchor: "middle", fill: "#000", fontSize: Math.min(0.35 * pxPerMm, 11), fontFamily: "monospace", fontWeight: "bold", style: { pointerEvents: "none" } }, p.pin),
+            );
+          }),
+
+          // Silk body
+          adapter.silkBody && adapter.silkBody.length > 2 && React.createElement("polygon", {
+            points: adapter.silkBody.map(p => { const s = toScreen(p.x + adapter.originOffset.x, p.y + adapter.originOffset.y); return `${s.sx},${s.sy}`; }).join(" "),
+            fill: "none", stroke: COLORS.silk, strokeWidth: 1, strokeDasharray: "3 2", opacity: 0.5,
+          }),
+
+          // Traces
+          adapter.traces.map((t, ti) => React.createElement("g", { key: `t${ti}` },
+            t.segments.map((s, si) => {
+              const p1 = toScreen(s.x1, s.y1), p2 = toScreen(s.x2, s.y2);
+              return React.createElement("line", { key: si, x1: p1.sx, y1: p1.sy, x2: p2.sx, y2: p2.sy, stroke: selectedTrace === ti ? COLORS.highlight : COLORS.trace, strokeWidth: Math.max(s.w * pxPerMm, 1.5), strokeLinecap: "round" });
+            })
+          )),
+
+          // Active trace
+          tool === "trace" && tracePoints.length > 0 && React.createElement("g", null,
+            tracePoints.slice(1).map((p, i) => {
+              const p1 = toScreen(tracePoints[i].x, tracePoints[i].y), p2 = toScreen(p.x, p.y);
+              return React.createElement("line", { key: i, x1: p1.sx, y1: p1.sy, x2: p2.sx, y2: p2.sy, stroke: COLORS.trace, strokeWidth: traceWidth * pxPerMm, strokeLinecap: "round" });
+            }),
+            mousePos && (() => {
+              const last = tracePoints[tracePoints.length - 1];
+              const p1 = toScreen(last.x, last.y), p2 = toScreen(mousePos.snapped.x, mousePos.snapped.y);
+              return React.createElement("line", { x1: p1.sx, y1: p1.sy, x2: p2.sx, y2: p2.sy, stroke: COLORS.tracePreview, strokeWidth: traceWidth * pxPerMm, strokeLinecap: "round" });
+            })(),
+            tracePoints.map((p, i) => { const s = toScreen(p.x, p.y); return React.createElement("circle", { key: `tp${i}`, cx: s.sx, cy: s.sy, r: 3, fill: COLORS.accent }); }),
+          ),
+
+          // Crosshair
+          tool === "trace" && mousePos && React.createElement("g", { opacity: 0.3 },
+            React.createElement("line", { x1: mousePos.screen.sx - 12, y1: mousePos.screen.sy, x2: mousePos.screen.sx + 12, y2: mousePos.screen.sy, stroke: COLORS.accent, strokeWidth: 0.5 }),
+            React.createElement("line", { x1: mousePos.screen.sx, y1: mousePos.screen.sy - 12, x2: mousePos.screen.sx, y2: mousePos.screen.sy + 12, stroke: COLORS.accent, strokeWidth: 0.5 }),
+          ),
+
+          // Origin marker
+          (() => {
+            const o = toScreen(0, 0);
+            return React.createElement("g", null,
+              React.createElement("line", { x1: o.sx - 10, y1: o.sy, x2: o.sx + 10, y2: o.sy, stroke: COLORS.origin, strokeWidth: 1.5 }),
+              React.createElement("line", { x1: o.sx, y1: o.sy - 10, x2: o.sx, y2: o.sy + 10, stroke: COLORS.origin, strokeWidth: 1.5 }),
+            );
+          })(),
+        ),
+
+        // Zoom label
+        React.createElement("div", { style: { position: "absolute", bottom: 8, right: 8, background: COLORS.panelBg + "cc", padding: "4px 10px", borderRadius: 4, fontSize: 10, color: COLORS.textDim } },
+          `${pxPerMm}px/mm | Alt+Drag=Pan | Scroll=Zoom | Ctrl+Z=Undo`
+        ),
+      ),
+
+      // Code panel
+      showCode && React.createElement("div", { style: { width: 420, borderLeft: `1px solid ${COLORS.panelBorder}`, background: COLORS.panelBg, display: "flex", flexDirection: "column" } },
+        React.createElement("div", { style: { padding: "8px 12px", borderBottom: `1px solid ${COLORS.panelBorder}`, display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          React.createElement("span", { style: { fontSize: 11, color: COLORS.accent } }, "GENERATED CODE"),
+          React.createElement("button", { onClick: () => { navigator.clipboard?.writeText(generateCode); }, style: btnStyle }, "📋 Copy"),
+        ),
+        React.createElement("pre", { style: { flex: 1, margin: 0, padding: 12, overflow: "auto", fontSize: 10, lineHeight: 1.5, color: COLORS.text, whiteSpace: "pre-wrap" } }, generateCode),
+      ),
+    )
+  );
+}
+
+ReactDOM.render(React.createElement(AdapterEditor), document.getElementById("root"));
+</script>
+</body>
+</html>
