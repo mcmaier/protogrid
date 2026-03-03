@@ -33,17 +33,16 @@
   let adapters = $state([]);
   let selectedInstanceId = $state(null);
 
+  let resolvedAdapters = $derived(adapters.map(inst => ({
+    ...inst,
+    _adapterDef: getRotatedAdapter(inst.adapterId, inst.rotation || 0),
+  })));
+
   function onSelect(id) {
     selectedInstanceId = id;
   }
 
   async function handleExport() {
-    // Attach rotated adapter definitions for Gerber generation
-    const resolvedAdapters = adapters.map(inst => ({
-      ...inst,
-      _adapterDef: getRotatedAdapter(inst.adapterId, inst.rotation || 0),
-    }));
-
     const files = generateAllFiles(config, resolvedAdapters);
     const name = `MacGizmoGrid-${config.width}x${config.height}-${config.pitch}mm.zip`;
     await downloadAsZip(files, name);
@@ -59,7 +58,7 @@
 
   <div class="ppp-layout">
     <aside class="ppp-sidebar">
-      <Controls bind:config onExport={handleExport} />
+      <Controls bind:config onExport={handleExport} {resolvedAdapters} />
     </aside>
     <main class="ppp-main">
       <ModuleToolbar bind:modules bind:adapters {config} {selectedInstanceId} {onSelect} />

@@ -1,13 +1,13 @@
 <script>
   import { computeSignalGrid, computeMinSize, BOARD_MIN_WIDTH, BOARD_MAX_WIDTH, BOARD_MIN_HEIGHT, BOARD_MAX_HEIGHT, MOUNT_EDGE_MIN, MOUNT_EDGE_MAX } from '../lib/gerber.js';
 
-  let { config = $bindable(), onExport } = $props();
+  let { config = $bindable(), onExport, resolvedAdapters = [] } = $props();
 
   let minSize = $derived(computeMinSize(config.pitch, config.powerRails, config.mountingHoles));
   let effMinW = $derived(Math.max(BOARD_MIN_WIDTH, minSize.minWidth));
   let effMinH = $derived(Math.max(BOARD_MIN_HEIGHT, minSize.minHeight));
 
-  let sigGrid = $derived(computeSignalGrid(config));
+  let sigGrid = $derived(computeSignalGrid(config, resolvedAdapters));
 
   // Text input buffers – decoupled from config so typing isn't interrupted
   let widthText = $state(String(config.width));

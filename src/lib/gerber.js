@@ -491,7 +491,7 @@ function buildSegments(start, end, exclusions, builder) {
 /**
  * Compute signal grid dimensions (excluding rail rows/cols)
  */
-export function computeSignalGrid(config) {
+export function computeSignalGrid(config, placedAdapters = []) {
   const { powerRails } = config;
   const { cols, rows } = computeGrid(config);
 
@@ -501,10 +501,17 @@ export function computeSignalGrid(config) {
   const sigCols = Math.max(0, cols - railCols);
   const sigRows = Math.max(0, rows - railRows);
 
-  const pads = generatePadPositions(config);
+  const pads = generatePadPositions(config, placedAdapters);
   const signalPads = pads.filter(p => p.type === 'signal').length;
 
-  return { cols: sigCols, rows: sigRows, total: signalPads };
+  // Add back adapter TH interface pins (they are usable signal pads)
+  let adapterTHPins = 0;
+  for (const inst of placedAdapters) {
+    const adapter = inst._adapterDef;
+    if (adapter) adapterTHPins += (adapter.throughPins || []).length;
+  }
+
+  return { cols: sigCols, rows: sigRows, total: signalPads + adapterTHPins };
 
 }
 
