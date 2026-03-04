@@ -559,14 +559,32 @@
           />
         {/if}
 
-        {#each a.def.features.copper as f}
-          {#if f.type === 'pad'}
-            <rect x={a.x + f.x - f.w / 2} y={a.y + f.y - f.h / 2}
-              width={f.w} height={f.h} fill="#c8a84e" fill-opacity="0.8" />
-          {:else if f.type === 'trace'}
-            <line x1={a.x + f.x1} y1={a.y + f.y1} x2={a.x + f.x2} y2={a.y + f.y2}
-              stroke="#c8a84e" stroke-width={f.w} stroke-opacity="0.7" stroke-linecap="round" />
+        {#each a.def.features.copperBack as b}
+          {#if b.type === 'trace'}
+            <line x1={a.x + b.x1} y1={a.y + b.y1} x2={a.x + b.x2} y2={a.y + b.y2}
+              stroke="#0b280b" stroke-width={b.w} stroke-opacity="0.4" stroke-linecap="round" />
           {/if}
+        {/each}
+
+        {#each a.def.features.copper as f}
+          {#if f.type === 'trace'}
+            <line x1={a.x + f.x1} y1={a.y + f.y1} x2={a.x + f.x2} y2={a.y + f.y2}
+              stroke="#72692e" stroke-width={f.w} stroke-opacity="0.8" stroke-linecap="round" />
+          {/if}
+        {/each}      
+        
+        {#each a.def.features.copper as f_p}
+          {#if f_p.type === 'pad'}
+            <rect x={a.x + f_p.x - f_p.w / 2} y={a.y + f_p.y - f_p.h / 2}
+              width={f_p.w} height={f_p.h} fill="#c8a84e" fill-opacity="0.9" rx="0.15" ry="0.15"/>
+          {/if}
+        {/each} 
+
+        {#each a.def.features.drills as via}
+          <circle cx={a.x + via.x} cy={a.y + via.y}
+            r={via.size/2} fill="#c8a84e" />
+          <circle cx={a.x + via.x} cy={a.y + via.y}
+            r={via.drill/2} fill="#1a1a1a" />
         {/each}
 
         {#each a.def.throughPins as pin}
