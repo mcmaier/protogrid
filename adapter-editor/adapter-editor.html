@@ -412,20 +412,20 @@ function AdapterEditor() {
     c += `    ],\n\n    features: {\n      copper: [\n        // SMD pads\n`;
     smdPads.forEach(p => { c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${p.w}, h: ${p.h} },   // Pin ${p.pin}\n`; });
     c += `\n        // F.Cu traces\n`;
-    traces.forEach(t => { t.segments.forEach(s => { c += `        { type: 'trace', x1: ${roundTo(s.x1, 4)}, y1: ${roundTo(s.y1, 4)}, x2: ${roundTo(s.x2, 4)}, y2: ${roundTo(s.y2, 4)}, w: ${s.w} },\n`; }); });
+    traces.forEach(t => { t.segments.forEach(s => { c += `        { type: 'trace', x1: ${roundTo(s.x1 + ox, 4)}, y1: ${roundTo(s.y1 + oy, 4)}, x2: ${roundTo(s.x2 + ox, 4)}, y2: ${roundTo(s.y2 + oy, 4)}, w: ${s.w} },\n`; }); });
     c += `      ],\n`;
 
     // B.Cu (copperBack)
     if (bottomTraces.length > 0) {
       c += `      copperBack: [\n`;
-      bottomTraces.forEach(t => { t.segments.forEach(s => { c += `        { type: 'trace', x1: ${roundTo(s.x1, 4)}, y1: ${roundTo(s.y1, 4)}, x2: ${roundTo(s.x2, 4)}, y2: ${roundTo(s.y2, 4)}, w: ${s.w} },\n`; }); });
+      bottomTraces.forEach(t => { t.segments.forEach(s => { c += `        { type: 'trace', x1: ${roundTo(s.x1 + ox, 4)}, y1: ${roundTo(s.y1 + oy, 4)}, x2: ${roundTo(s.x2 + ox, 4)}, y2: ${roundTo(s.y2 +oy, 4)}, w: ${s.w} },\n`; }); });
       c += `      ],\n`;
     }
 
     // Vias (drills)
     if (vias.length > 0) {
       c += `      drills: [\n`;
-      vias.forEach(v => { c += `        { x: ${roundTo(v.x, 4)}, y: ${roundTo(v.y, 4)}, drill: ${v.drill}, size: ${v.size} },\n`; });
+      vias.forEach(v => { c += `        { x: ${roundTo(v.x + ox, 4)}, y: ${roundTo(v.y + oy, 4)}, drill: ${v.drill}, size: ${v.size} },\n`; });
       c += `      ],\n`;
     }
 
@@ -684,6 +684,85 @@ function AdapterEditor() {
             );
           }),
 
+          //-----------------
+
+          // Traces (F.Cu - top)
+          (showLayer === "F.Cu" || showLayer === "both") && adapter.traces.map((t, ti) =>
+            React.createElement("g", { key: `t${ti}` },
+              t.segments.map((s, si) => {
+                const p1 = toScreen(
+                  s.x1 + adapter.originOffset.x,
+                  s.y1 + adapter.originOffset.y
+                );
+                const p2 = toScreen(
+                  s.x2 + adapter.originOffset.x,
+                  s.y2 + adapter.originOffset.y
+                );
+                return React.createElement("line", {
+                  key: si,
+                  x1: p1.sx, y1: p1.sy,
+                  x2: p2.sx, y2: p2.sy,
+                  stroke: selectedTrace === ti ? COLORS.highlight : COLORS.trace,
+                  strokeWidth: Math.max(s.w * pxPerMm, 1.5),
+                  strokeLinecap: "round",
+                });
+              })
+            )
+          ),
+
+          // Traces (B.Cu - bottom)
+          (showLayer === "B.Cu" || showLayer === "both") && bottomTraces.map((t, ti) =>
+            React.createElement("g", { key: `bt${ti}` },
+              t.segments.map((s, si) => {
+                const p1 = toScreen(
+                  s.x1 + adapter.originOffset.x,
+                  s.y1 + adapter.originOffset.y
+                );
+                const p2 = toScreen(
+                  s.x2 + adapter.originOffset.x,
+                  s.y2 + adapter.originOffset.y
+                );
+                return React.createElement("line", {
+                  key: si,
+                  x1: p1.sx, y1: p1.sy,
+                  x2: p2.sx, y2: p2.sy,
+                  stroke: "#4488ff",
+                  strokeWidth: Math.max(s.w * pxPerMm, 1.5),
+                  strokeLinecap: "round",
+                  opacity: showLayer === "both" ? 0.6 : 1,
+                });
+              })
+            )
+          ),
+
+          // Vias
+          vias.map((v, vi) => {
+            const s = toScreen(
+              v.x + adapter.originOffset.x,
+              v.y + adapter.originOffset.y
+            );
+            const outerR = (v.size / 2) * pxPerMm;
+            const innerR = (v.drill / 2) * pxPerMm;
+
+            return React.createElement("g", { key: `v${vi}` },
+              React.createElement("circle", {
+                cx: s.sx, cy: s.sy,
+                r: outerR,
+                fill: "#c8a020",
+                stroke: "#e8c040",
+                strokeWidth: 1,
+              }),
+              React.createElement("circle", {
+                cx: s.sx, cy: s.sy,
+                r: innerR,
+                fill: COLORS.bg,
+                stroke: "#888",
+                strokeWidth: 0.5,
+              }),
+            );
+          }),
+
+          /*
           // Silk body
           adapter.silkBody && adapter.silkBody.length > 2 && React.createElement("polygon", {
             points: adapter.silkBody.map(p => { const s = toScreen(p.x + adapter.originOffset.x, p.y + adapter.originOffset.y); return `${s.sx},${s.sy}`; }).join(" "),
@@ -693,7 +772,7 @@ function AdapterEditor() {
           // Traces (F.Cu - top)
           (showLayer === "F.Cu" || showLayer === "both") && adapter.traces.map((t, ti) => React.createElement("g", { key: `t${ti}` },
             t.segments.map((s, si) => {
-              const p1 = toScreen(s.x1, s.y1), p2 = toScreen(s.x2, s.y2);
+              const p1 = toScreen(s.x1 , s.y1), p2 = toScreen(s.x2, s.y2);
               return React.createElement("line", { key: si, x1: p1.sx, y1: p1.sy, x2: p2.sx, y2: p2.sy, stroke: selectedTrace === ti ? COLORS.highlight : COLORS.trace, strokeWidth: Math.max(s.w * pxPerMm, 1.5), strokeLinecap: "round" });
             })
           )),
@@ -716,6 +795,7 @@ function AdapterEditor() {
               React.createElement("circle", { cx: s.sx, cy: s.sy, r: innerR, fill: COLORS.bg, stroke: "#888", strokeWidth: 0.5 }),
             );
           }),
+          */
 
           // Active trace
           tool === "trace" && tracePoints.length > 0 && React.createElement("g", null,
