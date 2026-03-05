@@ -1,7 +1,7 @@
 <script>
   import { computeSignalGrid, computeMinSize, BOARD_MIN_WIDTH, BOARD_MAX_WIDTH, BOARD_MIN_HEIGHT, BOARD_MAX_HEIGHT, MOUNT_EDGE_MIN, MOUNT_EDGE_MAX } from '../lib/gerber.js';
 
-  let { config = $bindable(), onExport, resolvedAdapters = [] } = $props();
+  let { config = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [] } = $props();
 
   let minSize = $derived(computeMinSize(config.pitch, config.powerRails, config.mountingHoles));
   let effMinW = $derived(Math.max(BOARD_MIN_WIDTH, minSize.minWidth));
@@ -110,6 +110,12 @@
     config.mountingHoles = { ...config.mountingHoles, diameter: +e.target.value };
   }
 
+
+  function handleProjectFileChange(event) {
+    const [file] = event.target.files || [];
+    onLoadProject?.(file);
+    event.target.value = '';
+  }
   const LABEL_STEPS = [0, 1, 2, 5]; // off → every → every 2nd → every 5th
 
   function cycleLabelStep(which) {
@@ -242,6 +248,14 @@
     <div class="warning">Board has no signal pads!</div>
   {/if}
 
+  <div class="project-actions">
+    <button class="secondary-btn" onclick={onSaveProject}>Projekt speichern</button>
+    <label class="secondary-btn file-btn">
+      Projekt laden
+      <input type="file" accept=".json,.gridgen.json,application/json" onchange={handleProjectFileChange} />
+    </label>
+  </div>
+
   <div class="download-hint">
     <span>Gerber RS-274X + Excellon Drill</span>
   </div>  
@@ -347,6 +361,33 @@
   }
   .export-btn:hover { background: #c49800; }
   .export-btn:disabled { background: #585b70; cursor: not-allowed; }
+
+
+  .project-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .secondary-btn {
+    flex: 1;
+    border: 1px solid #6c7086;
+    background: #313244;
+    color: #cdd6f4;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: center;
+  }
+
+  .secondary-btn:hover {
+    background: #3b3f58;
+  }
+
+  .file-btn input {
+    display: none;
+  }
 
   .download-hint {
     padding: 4px;
