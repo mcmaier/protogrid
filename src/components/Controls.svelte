@@ -248,21 +248,29 @@
     <div class="warning">Board has no signal pads!</div>
   {/if}
 
-  <div class="project-actions">
-    <button class="secondary-btn" onclick={onSaveProject}>Projekt speichern</button>
-    <label class="secondary-btn file-btn">
-      Projekt laden
-      <input type="file" accept=".json,.gridgen.json,application/json" onchange={handleProjectFileChange} />
-    </label>
+  <div class="project-section">
+    <div class="project-actions">
+      <button class="secondary-btn" onclick={onSaveProject}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16">
+        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
+        <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/>
+        </svg> Save</button>
+      <label class="secondary-btn file-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-upload" viewBox="0 0 16 16">
+          <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
+          <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/>
+        </svg> Load
+        <input type="file" accept=".json,.gridgen.json,application/json" onchange={handleProjectFileChange} />
+      </label>
+    </div>
+
+    <button class="export-btn" onclick={onExport} disabled={sigGrid.total === 0}>
+      Download Gerber ZIP
+    </button>
+
+    <div class="download-hint">
+      <span>Gerber RS-274X + Excellon Drill</span>
+    </div>  
   </div>
-
-  <div class="download-hint">
-    <span>Gerber RS-274X + Excellon Drill</span>
-  </div>  
-
-  <button class="export-btn" onclick={onExport} disabled={sigGrid.total === 0}>
-    Download Gerber ZIP
-  </button>
 
   <div class="order-section">
     <h3>How to order the PCB?</h3>
@@ -362,6 +370,11 @@
   .export-btn:hover { background: #c49800; }
   .export-btn:disabled { background: #585b70; cursor: not-allowed; }
 
+  .project-section {
+    display: flex; flex-direction: column; gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid #45475a;
+  }
 
   .project-actions {
     display: flex;
@@ -383,6 +396,12 @@
 
   .secondary-btn:hover {
     background: #3b3f58;
+  }
+
+  .file-btn {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
   }
 
   .file-btn input {
