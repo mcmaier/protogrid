@@ -30,7 +30,7 @@ const DEFAULT_ADAPTER = {
   id: "soic8", name: "SOIC-8", category: "SOIC",
   widthPins: 4, heightPins: 4,
   originOffset: { x: 0, y: 0 },
-  smdPads: [], traces: [], throughPins: [], silkBody: null, silkLines: [],
+  smdPads: [], traces: [], throughPins: [], silkBody: null, silkLines: [], silkText: [],
 };
 
 function parseKicadMod(text) {
@@ -215,6 +215,7 @@ function parseKicadPcb(text) {
 
   // 5) Silkscreen (F.SilkS)
   const silkLines = [];
+  const silkText = [];
 
   const parseFpShapeLines = (shapeRe, body, baseX, baseY, cosR, sinR) => {
     shapeRe.lastIndex = 0;
@@ -251,6 +252,7 @@ function parseKicadPcb(text) {
   const fpSilkRectRe = /\(fp_rect\s+\(start\s+([-\d.]+)\s+([-\d.]+)\)\s+\(end\s+([-\d.]+)\s+([-\d.]+)\)[\s\S]*?\(layer\s+"F\.SilkS"\)/g;
   fpRe.lastIndex = 0;
   while ((m = fpRe.exec(text)) !== null) {
+    const fpName = m[1].split(":").pop();
     const fpBody = m[2];
     const atMatch = fpBody.match(/^\s*\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/m);
     if (!atMatch) continue;
@@ -275,6 +277,28 @@ function parseKicadPcb(text) {
       parseFpShapeLines(fpSilkLineRe, rectBody, fx, fy, cosR, sinR);
     }
     fpSilkRectRe.lastIndex = 0;
+
+    const fpRefTextRe = /\(fp_text\s+reference\s+"([^"]+)"\s+\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)[\s\S]*?\(layer\s+"F\.SilkS"\)[\s\S]*?\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/g;
+    let tm;
+    while ((tm = fpRefTextRe.exec(fpBody)) !== null) {
+      const text = tm[1];
+      const tx = parseFloat(tm[2]), ty = parseFloat(tm[3]);
+      const tRot = parseFloat(tm[4] || 0);
+      const fontH = parseFloat(tm[6]);
+
+      const absX = fx + tx * cosR - ty * sinR;
+      const absY = fy + tx * sinR + ty * cosR;
+      const absRot = ((parseFloat(atMatch[3] || 0) + tRot) % 360 + 360) % 360;
+
+      silkText.push({
+        text,
+        fp: fpName,
+        x: roundTo(absX - boardLeft, 4),
+        y: roundTo(absY - boardTop, 4),
+        height: roundTo(fontH, 4),
+        rotation: roundTo(absRot, 2),
+      });
+    }
   }
 
   // 6) Nets
@@ -288,7 +312,7 @@ function parseKicadPcb(text) {
     boardW, boardH, boardLeft, boardTop,
     fcuPads, bcuPads,
     fcuTraces, bcuTraces,
-    vias, nets, silkLines,
+    vias, nets, silkLines, silkText,
   };
 }
 
@@ -298,7 +322,7 @@ function parseKicadPcb(text) {
  */
 function kicadPcbToAdapter(parsed) {
   if (parsed.error) return null;
-  const { boardW, boardH, fcuPads, bcuPads, fcuTraces, bcuTraces, vias, nets, silkLines } = parsed;
+  const { boardW, boardH, fcuPads, bcuPads, fcuTraces, bcuTraces, vias, nets, silkLines, silkText } = parsed;
 
   // Flip Y: editor uses Y-up, KiCad uses Y-down. newY = boardH - oldY
   const flipY = (y) => roundTo(boardH - y, 4);
@@ -335,12 +359,22 @@ function kicadPcbToAdapter(parsed) {
     y2: flipY(s.y2),
   }));
 
+  const editorSilkText = silkText.map(t => ({
+    text: t.text,
+    x: t.x,
+    y: flipY(t.y),
+    height: t.height,
+    rotation: t.rotation,
+    fp: t.fp,
+  }));
+
   return {
     smdPads,
     topTraces,
     bottomTraces,
     vias: editorVias,
     silkLines: editorSilkLines,
+    silkText: editorSilkText,
     boardW, boardH,
     nets,
   };
@@ -464,7 +498,7 @@ function AdapterEditor() {
     if (parsed.pads.length === 0) return;
     const pads = parsed.pads.map(p => ({ pin: p.pin, x: roundTo(p.x, 3), y: roundTo(-p.y, 3), w: roundTo(p.w, 3), h: roundTo(p.h, 3) }));
     const body = parsed.bodyPoly ? parsed.bodyPoly.map(p => ({ x: roundTo(p.x, 3), y: roundTo(-p.y, 3) })) : null;
-    setAdapter(a => ({ ...a, smdPads: pads, silkBody: body, silkLines: [], traces: [] }));
+    setAdapter(a => ({ ...a, smdPads: pads, silkBody: body, silkLines: [], silkText: [], traces: [] }));
     setShowImport(false);
   };
 
@@ -477,7 +511,7 @@ function AdapterEditor() {
   };
 
   const generateCode = useMemo(() => {
-    const { id, name, category, widthPins, heightPins, smdPads, traces, throughPins, originOffset, silkBody, silkLines } = adapter;
+    const { id, name, category, widthPins, heightPins, smdPads, traces, throughPins, originOffset, silkBody, silkLines, silkText } = adapter;
     const ox = originOffset.x, oy = originOffset.y;
     let c = `  {\n    id: '${id}',\n    name: '${name}',\n    category: '${category}',\n    pitch: 2.54,\n    color: '#a060c0',\n\n`;
     c += `    throughPins: [\n`;
@@ -517,7 +551,15 @@ function AdapterEditor() {
       const p1 = smdPads[0];
       c += `        { type: 'circle', x: ${roundTo(p1.x + ox - 0.3, 4)}, y: ${roundTo(p1.y + oy + 0.5, 4)}, d: 0.25 },\n`;
     }
-    c += `      ],\n    },\n\n`;
+    c += `      ],\n`;
+    if (silkText.length > 0) {
+      c += `      silkText: [\n`;
+      silkText.forEach(t => {
+        c += `        { text: '${t.text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}', x: ${roundTo(t.x + ox, 4)}, y: ${roundTo(t.y + oy, 4)}, height: ${t.height || 1}, rotation: ${t.rotation || 0} },\n`;
+      });
+      c += `      ],\n`;
+    }
+    c += `    },\n\n`;
     c += `    outline: { width: ${roundTo((widthPins - 1) * GRID + 2, 1)}, height: ${roundTo((heightPins - 1) * GRID + 2, 1)} },\n`;
     c += `    outlineOffset: { x: 0, y: 0 },\n    widthPins: ${widthPins},\n    heightPins: ${heightPins},\n  },`;
     return c;
@@ -619,7 +661,7 @@ function AdapterEditor() {
               for (const t of parsed.traces) { minX = Math.min(minX, t.x1, t.x2); minY = Math.min(minY, t.y1, t.y2); }
               const pads = parsed.pads.map((p,i) => ({ pin: i+1, x: roundTo(p.x-minX,4), y: roundTo(p.y-minY,4), w: p.w, h: p.h }));
               const traces = parsed.traces.map(t => ({ segments: [{ x1: roundTo(t.x1-minX,4), y1: roundTo(t.y1-minY,4), x2: roundTo(t.x2-minX,4), y2: roundTo(t.y2-minY,4), w: t.w }] }));
-              setAdapter(a => ({ ...a, smdPads: pads, traces: [...a.traces, ...traces], silkLines: [] }));
+              setAdapter(a => ({ ...a, smdPads: pads, traces: [...a.traces, ...traces], silkLines: [], silkText: [] }));
               setShowImport(false);
             }, style: { ...btnStyle, background: "#40a060", color: "#fff" } }, "Gerber"),
             React.createElement("button", { onClick: () => {
@@ -636,6 +678,7 @@ function AdapterEditor() {
                 smdPads: result.smdPads,
                 traces: result.topTraces,
                 silkLines: result.silkLines,
+                silkText: result.silkText,
               }));
               setBottomTraces(result.bottomTraces);
               setVias(result.vias);
