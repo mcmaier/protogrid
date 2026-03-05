@@ -4,7 +4,7 @@
   import { getRotatedAdapter } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
-  let { config, modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable() } = $props();
+  let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable() } = $props();
 
   let fullConfig = $derived({
     ...config,

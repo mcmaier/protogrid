@@ -183,7 +183,7 @@
   </div>
 
   <div class="control-group">
-    <h3>Power Rails</h3>
+    <h3>Power Rails &amp; Signal Tracks</h3>
     <div class="rail-toggles">
       <button class="rail-btn" class:active={config.powerRails.top}
         onclick={() => toggleRail('top')}>Top</button>
@@ -199,7 +199,7 @@
   <div class="control-group">
     <div class="track-actions">
       <button class="rail-btn" class:active={trackDrawMode} onclick={trackDrawModeToggle}>
-        Draw Signal Tracks
+        Draw Signal Track
       </button>
       <button class="rail-btn track-delete-btn" onclick={onDeleteCustomTracks} disabled={customTrackCount === 0}>
         Delete Tracks ({customTrackCount})

@@ -144,7 +144,7 @@
     </aside>
     <main class="ppp-main">
       <ModuleToolbar bind:modules bind:adapters {config} {selectedInstanceId} {onSelect} />
-      <Preview {config} bind:modules bind:adapters {selectedInstanceId} {onSelect} signalTrackDrawMode={signalTrackDrawMode} />
+      <Preview bind:config bind:modules bind:adapters {selectedInstanceId} {onSelect} signalTrackDrawMode={signalTrackDrawMode} />
     </main>
   </div>
 
