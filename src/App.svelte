@@ -30,12 +30,14 @@
       rows: 0,
       cols: 0,
     },
+    signalTracks: [],
   };
 
   let config = $state(structuredClone(defaultConfig));
   let modules = $state([]);
   let adapters = $state([]);
   let selectedInstanceId = $state(null);
+  let signalTrackDrawMode = $state(false);
 
   let resolvedAdapters = $derived(adapters.map(inst => ({
     ...inst,
@@ -83,6 +85,7 @@
       modules = imported.modules;
       adapters = imported.adapters;
       selectedInstanceId = null;
+      signalTrackDrawMode = false;
 
       if (imported.isFutureVersion) {
         alert('Projektdatei wurde mit einer neueren Version erstellt. Nicht bekannte Felder wurden ignoriert.');
@@ -102,6 +105,10 @@
       document.exitFullscreen();
     }
     fullscreenStore.update(v => !v);
+  }
+
+  function toggleSignalTrackDrawMode() {
+    signalTrackDrawMode = !signalTrackDrawMode;
   }
 </script>
 
@@ -125,11 +132,11 @@
 
   <div class="ppp-layout">
     <aside class="ppp-sidebar">
-      <Controls bind:config onExport={handleExport} onSaveProject={handleSaveProject} onLoadProject={handleLoadProject} {resolvedAdapters} />
+      <Controls bind:config onExport={handleExport} onSaveProject={handleSaveProject} onLoadProject={handleLoadProject} {resolvedAdapters} signalTrackDrawMode={signalTrackDrawMode} onToggleSignalTrackDrawMode={toggleSignalTrackDrawMode} />
     </aside>
     <main class="ppp-main">
       <ModuleToolbar bind:modules bind:adapters {config} {selectedInstanceId} {onSelect} />
-      <Preview {config} bind:modules bind:adapters {selectedInstanceId} {onSelect} />
+      <Preview {config} bind:modules bind:adapters {selectedInstanceId} {onSelect} signalTrackDrawMode={signalTrackDrawMode} />
     </main>
   </div>
 

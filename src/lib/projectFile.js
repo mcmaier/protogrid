@@ -19,6 +19,7 @@ function sanitizeConfig(rawConfig, defaults) {
   const powerRails = isObject(config.powerRails) ? config.powerRails : {};
   const mountingHoles = isObject(config.mountingHoles) ? config.mountingHoles : {};
   const labels = isObject(config.labels) ? config.labels : {};
+  const signalTracks = Array.isArray(config.signalTracks) ? config.signalTracks : [];
 
   return {
     width: toNumber(config.width, defaults.width),
@@ -41,6 +42,14 @@ function sanitizeConfig(rawConfig, defaults) {
       rows: toNumber(labels.rows, defaults.labels.rows),
       cols: toNumber(labels.cols, defaults.labels.cols),
     },
+    signalTracks: signalTracks
+      .filter(track => isObject(track))
+      .map(track => ({
+        startCol: Math.floor(toNumber(track.startCol, 0)),
+        startRow: Math.floor(toNumber(track.startRow, 0)),
+        endCol: Math.floor(toNumber(track.endCol, 0)),
+        endRow: Math.floor(toNumber(track.endRow, 0)),
+      })),
   };
 }
 

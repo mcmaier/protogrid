@@ -399,6 +399,35 @@ export function generatePowerRailTraces(config, placedAdapters = []) {
   function rails(side) { return powerRails[side]; }
 }
 
+export function generateSignalTraces(config) {
+  const tracks = Array.isArray(config.signalTracks) ? config.signalTracks : [];
+  if (tracks.length === 0) return [];
+
+  const { pitch } = config;
+  const { gridLeft, gridBottom, cols, rows } = computeGrid(config);
+  const result = [];
+
+  for (const track of tracks) {
+    const startCol = Math.max(0, Math.min(cols - 1, Math.floor(track.startCol)));
+    const endCol = Math.max(0, Math.min(cols - 1, Math.floor(track.endCol)));
+    const startRow = Math.max(0, Math.min(rows - 1, Math.floor(track.startRow)));
+    const endRow = Math.max(0, Math.min(rows - 1, Math.floor(track.endRow)));
+
+    if (startCol !== endCol && startRow !== endRow) continue;
+    if (startCol === endCol && startRow === endRow) continue;
+
+    result.push({
+      x1: round4(gridLeft + startCol * pitch),
+      y1: round4(gridBottom + startRow * pitch),
+      x2: round4(gridLeft + endCol * pitch),
+      y2: round4(gridBottom + endRow * pitch),
+      type: 'signal',
+    });
+  }
+
+  return result;
+}
+
 /**
  * Clip a single trace around circular keepout zones AND adapter obstacles.
  * Margin per edge depends on trace direction vs which edges have TH pads:
@@ -577,6 +606,7 @@ export function generateEdgeCuts(config) {
 export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters = []) {
   const pads = generatePadPositions(config, placedAdapters);
   const traces = generatePowerRailTraces(config, placedAdapters);
+  const signalTraces = generateSignalTraces(config);
   const holes = computeMountingHoles(config);
   const { padDiameter, annularRing, pitch } = config;
   const { gridLeft, gridBottom } = computeGrid(config);
@@ -754,10 +784,14 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
     gerber += `X${fmtCoord(pad.x)}Y${fmtCoord(pad.y)}D03*\n`;
   }
 
-  // Draw power rail traces (top layer only – easier to cut with a knife)
-  if (isTopLayer && traces.length > 0) {
+  // Draw rail/signal traces on top layer
+  if (isTopLayer && (traces.length > 0 || signalTraces.length > 0)) {
     gerber += `D20*\n`;
     for (const t of traces) {
+      gerber += `X${fmtCoord(t.x1)}Y${fmtCoord(t.y1)}D02*\n`;
+      gerber += `X${fmtCoord(t.x2)}Y${fmtCoord(t.y2)}D01*\n`;
+    }
+    for (const t of signalTraces) {
       gerber += `X${fmtCoord(t.x1)}Y${fmtCoord(t.y1)}D02*\n`;
       gerber += `X${fmtCoord(t.x2)}Y${fmtCoord(t.y2)}D01*\n`;
     }

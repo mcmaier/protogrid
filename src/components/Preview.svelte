@@ -1,10 +1,10 @@
 <script>
-  import { computeGrid, generatePadPositions, generatePowerRailTraces, computeMountingHoles, generateLabelStrokes, RAIL_TRACE_WIDTH, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
+  import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, RAIL_TRACE_WIDTH, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
   import { getRotatedModule } from '../lib/modules.js';
   import { getRotatedAdapter } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
-  let { config, modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect } = $props();
+  let { config, modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = false } = $props();
 
   let fullConfig = $derived({
     ...config,
@@ -18,6 +18,7 @@
 
   let pads = $derived(generatePadPositions(fullConfig, resolvedAdapters));
   let traces = $derived(generatePowerRailTraces(fullConfig, resolvedAdapters));
+  let signalTraces = $derived(generateSignalTraces(fullConfig));
   let mountHoles = $derived(computeMountingHoles(fullConfig));
   let labelStrokes = $derived(generateLabelStrokes(fullConfig));
   let grid = $derived(computeGrid(fullConfig));
@@ -230,7 +231,53 @@
     zoomLevel = Math.max(1, Math.min(10, zoomLevel + delta * zoomLevel));
   }
 
+  function snapToGridPoint(e) {
+    const pt = getSvgPoint(e);
+    const col = Math.round((pt.x - grid.gridLeft) / config.pitch);
+    const row = Math.round((pt.y - grid.gridBottom) / config.pitch);
+    if (col < 0 || col >= grid.cols || row < 0 || row >= grid.rows) return null;
+    return { col, row };
+  }
+
+  function projectTrackEnd(start, point) {
+    const dc = Math.abs(point.col - start.col);
+    const dr = Math.abs(point.row - start.row);
+    return dc >= dr
+      ? { col: point.col, row: start.row }
+      : { col: start.col, row: point.row };
+  }
+
   function onPreviewPointerDown(e) {
+    if (signalTrackDrawMode && e.button === 0 && !e.ctrlKey && !dragging) {
+      const snapped = snapToGridPoint(e);
+      if (snapped) {
+        e.preventDefault();
+        e.stopPropagation();
+        onSelect(null);
+
+        if (!signalTrackStart) {
+          signalTrackStart = snapped;
+          signalTrackHover = snapped;
+        } else {
+          const end = projectTrackEnd(signalTrackStart, snapped);
+          if (end.col !== signalTrackStart.col || end.row !== signalTrackStart.row) {
+            config.signalTracks = [
+              ...(config.signalTracks || []),
+              {
+                startCol: signalTrackStart.col,
+                startRow: signalTrackStart.row,
+                endCol: end.col,
+                endRow: end.row,
+              },
+            ];
+          }
+          signalTrackStart = null;
+          signalTrackHover = null;
+        }
+        return;
+      }
+    }
+
     // Middle mouse button or Ctrl+Left for panning the view
     if (e.button === 1 || (e.button === 0 && e.ctrlKey)) {
       e.preventDefault();
@@ -241,7 +288,6 @@
     } else if (e.button === 0 && !e.ctrlKey) {
       // Only deselect when clicking on the SVG itself or the board rect,
       // not when clicking on adapter/module overlays (those handle their own selection)
-      const tag = e.target.tagName;
       const isBackground = e.target === svgEl || e.target.closest('.module-overlay, .adapter-overlay') === null;
       if (isBackground) {
         onSelect(null);
@@ -276,6 +322,21 @@
 
   // ── Touch gestures for mobile (2-finger pan + pinch zoom) ──
   let touchState = $state(null); // { startTouches, startPanX, startPanY, startZoom }
+  let signalTrackStart = $state(null);
+  let signalTrackHover = $state(null);
+
+  $effect(() => {
+    if (!signalTrackDrawMode) {
+      signalTrackStart = null;
+      signalTrackHover = null;
+    }
+  });
+
+  function onPreviewPointerMove(e) {
+    if (!signalTrackDrawMode || !signalTrackStart) return;
+    const snapped = snapToGridPoint(e);
+    signalTrackHover = snapped ? projectTrackEnd(signalTrackStart, snapped) : null;
+  }
 
   function getTouchCenter(touches) {
     const t0 = touches[0], t1 = touches[1];
@@ -343,6 +404,7 @@
   class:has-modules={modules.length > 0 || adapters.length > 0}
   onwheel={onPreviewWheel}
   onpointerdown={onPreviewPointerDown}
+  onpointermove={onPreviewPointerMove}
   ontouchstart={onPreviewTouchStart}
   ontouchmove={onPreviewTouchMove}
   ontouchend={onPreviewTouchEnd}
@@ -370,6 +432,33 @@
       opacity="0.7"
     />
   {/each}
+
+  {#each signalTraces as t}
+    <line
+      x1={t.x1} y1={t.y1}
+      x2={t.x2} y2={t.y2}
+      stroke={colors.signal}
+      stroke-width={RAIL_TRACE_WIDTH}
+      stroke-linecap="round"
+      opacity="0.85"
+    />
+  {/each}
+
+  {#if signalTrackDrawMode && signalTrackStart && signalTrackHover}
+    {@const sx = grid.gridLeft + signalTrackStart.col * config.pitch}
+    {@const sy = grid.gridBottom + signalTrackStart.row * config.pitch}
+    {@const ex = grid.gridLeft + signalTrackHover.col * config.pitch}
+    {@const ey = grid.gridBottom + signalTrackHover.row * config.pitch}
+    <line
+      x1={sx} y1={sy}
+      x2={ex} y2={ey}
+      stroke="#f9e2af"
+      stroke-width={RAIL_TRACE_WIDTH}
+      stroke-dasharray="0.8 0.4"
+      stroke-linecap="round"
+      opacity="0.95"
+    />
+  {/if}
 
   <!-- Power rail traces -->
   {#each traces as t}

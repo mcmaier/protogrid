@@ -1,7 +1,7 @@
 <script>
   import { computeSignalGrid, computeMinSize, BOARD_MIN_WIDTH, BOARD_MAX_WIDTH, BOARD_MIN_HEIGHT, BOARD_MAX_HEIGHT, MOUNT_EDGE_MIN, MOUNT_EDGE_MAX } from '../lib/gerber.js';
 
-  let { config = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [] } = $props();
+  let { config = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [], signalTrackDrawMode = false, onToggleSignalTrackDrawMode } = $props();
 
   let minSize = $derived(computeMinSize(config.pitch, config.powerRails, config.mountingHoles));
   let effMinW = $derived(Math.max(BOARD_MIN_WIDTH, minSize.minWidth));
@@ -190,6 +190,12 @@
       <button class="rail-btn" class:active={config.powerRails.right}
         onclick={() => toggleRail('right')}>Right</button>
     </div>
+  </div>
+
+  <div class="control-group">
+    <button class="rail-btn" class:active={signalTrackDrawMode} onclick={onToggleSignalTrackDrawMode}>
+      Draw Signal Tracks
+    </button>
   </div>
 
   <div class="control-group">
