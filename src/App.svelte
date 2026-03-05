@@ -7,8 +7,9 @@
   import { downloadAsZip } from './lib/zip.js';
   import { getRotatedAdapter } from './lib/adapters.js';
   import { fullscreen } from './lib/fullscreen.js';
+  import { parseProject, serializeProject } from './lib/projectFile.js';
 
-  let config = $state({
+  const defaultConfig = {
     width: 50,
     height: 40,
     pitch: 2.54,
@@ -21,16 +22,17 @@
       right: false,
     },
     mountingHoles: {
-      mode: 'none',       // 'none' | 'diagonal' | '4corners'
-      diameter: 3.2,       // mm
-      edgeDistance: 4.0,    // mm from board edge
+      mode: 'none',
+      diameter: 3.2,
+      edgeDistance: 4.0,
     },
     labels: {
-      rows: 0,          // row numbers on left
-      cols: 0,          // column letters on top
+      rows: 0,
+      cols: 0,
     },
-  });
+  };
 
+  let config = $state(structuredClone(defaultConfig));
   let modules = $state([]);
   let adapters = $state([]);
   let selectedInstanceId = $state(null);
@@ -52,8 +54,47 @@
     if (typeof gridgenTrack === 'function') gridgenTrack('gerber_export');
   }
 
+  function downloadTextFile(content, filename, mimeType = 'application/json') {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function handleSaveProject() {
+    const json = serializeProject({ config, modules, adapters });
+    const filename = `MacGizmoGrid-${config.width}x${config.height}.gridgen.json`;
+    downloadTextFile(json, filename);
+  }
+
+  async function handleLoadProject(file) {
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const imported = parseProject(text, defaultConfig);
+
+      config = imported.config;
+      modules = imported.modules;
+      adapters = imported.adapters;
+      selectedInstanceId = null;
+
+      if (imported.isFutureVersion) {
+        alert('Projektdatei wurde mit einer neueren Version erstellt. Nicht bekannte Felder wurden ignoriert.');
+      }
+    } catch (error) {
+      console.error(error);
+      alert(`Projektdatei konnte nicht geladen werden: ${error?.message || 'Unbekannter Fehler'}`);
+    }
+  }
+
   const fullscreenStore = writable(false);
-  
+
   function toggleFullscreen(node) {
     if (!$fullscreenStore) {
       node.requestFullscreen();
@@ -84,7 +125,7 @@
 
   <div class="ppp-layout">
     <aside class="ppp-sidebar">
-      <Controls bind:config onExport={handleExport} {resolvedAdapters} />
+      <Controls bind:config onExport={handleExport} onSaveProject={handleSaveProject} onLoadProject={handleLoadProject} {resolvedAdapters} />
     </aside>
     <main class="ppp-main">
       <ModuleToolbar bind:modules bind:adapters {config} {selectedInstanceId} {onSelect} />
