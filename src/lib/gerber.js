@@ -983,7 +983,10 @@ export function generateSilkscreen(config, placedAdapters = []) {
     }
 
     for (const st of adapter.features.silkText) {
-      const labelStrokes = getTextStrokes(
+      if(!st)
+        continue;
+
+      const textStrokes = getTextStrokes(
         st.text,
         originX + st.x,
         originY + st.y,
@@ -991,7 +994,7 @@ export function generateSilkscreen(config, placedAdapters = []) {
         st.anchor || 'center',
         st.rotation || 0
       );
-      for (const polyline of labelStrokes) {
+      for (const polyline of textStrokes) {
         if (polyline.length < 2) continue;
         gerber += `X${fmtCoord(polyline[0].x)}Y${fmtCoord(polyline[0].y)}D02*\n`;
         for (let i = 1; i < polyline.length; i++) {

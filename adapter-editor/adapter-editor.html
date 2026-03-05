@@ -278,14 +278,7 @@ function parseKicadPcb(text) {
     }
     fpSilkRectRe.lastIndex = 0;
 
-    const fpRefTextRe = /\(fp_text\s+reference\s+"([^"]+)"\s+\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)[\s\S]*?\(layer\s+"F\.SilkS"\)[\s\S]*?\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/g;
-    let tm;
-    while ((tm = fpRefTextRe.exec(fpBody)) !== null) {
-      const text = tm[1];
-      const tx = parseFloat(tm[2]), ty = parseFloat(tm[3]);
-      const tRot = parseFloat(tm[4] || 0);
-      const fontH = parseFloat(tm[6]);
-
+    const addSilkText = (text, tx, ty, tRot, fontH) => {
       const absX = fx + tx * cosR - ty * sinR;
       const absY = fy + tx * sinR + ty * cosR;
       const absRot = ((parseFloat(atMatch[3] || 0) + tRot) % 360 + 360) % 360;
@@ -298,6 +291,36 @@ function parseKicadPcb(text) {
         height: roundTo(fontH, 4),
         rotation: roundTo(absRot, 2),
       });
+    };
+
+    // Older KiCad syntax: (fp_text reference "R1" ...)
+    const fpRefTextRe = /\(fp_text\s+reference\s+"([^"]+)"\s+\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)[\s\S]*?\(layer\s+"F\.SilkS"\)[\s\S]*?\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/g;
+    let tm;
+    while ((tm = fpRefTextRe.exec(fpBody)) !== null) {
+      addSilkText(tm[1], parseFloat(tm[2]), parseFloat(tm[3]), parseFloat(tm[4] || 0), parseFloat(tm[6]));
+    }
+
+    // KiCad v7/v8 syntax: (property "Reference" "R1" (at ...) (layer "F.SilkS") ...)
+    const fpRefPropRe = /\(property\s+"Reference"\s+"([^"]+)"([\s\S]*?)\n\s*\)/g;
+    while ((tm = fpRefPropRe.exec(fpBody)) !== null) {
+      const propText = tm[1];
+      const propBody = tm[2];
+
+      if (!/\(layer\s+"F\.SilkS"\)/.test(propBody)) continue;
+
+      const propAt = propBody.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+      if (!propAt) continue;
+
+      const propFont = propBody.match(/\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/);
+      const fontH = propFont ? parseFloat(propFont[2]) : 1;
+
+      addSilkText(
+        propText,
+        parseFloat(propAt[1]),
+        parseFloat(propAt[2]),
+        parseFloat(propAt[3] || 0),
+        fontH,
+      );
     }
   }
 

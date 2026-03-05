@@ -1466,9 +1466,16 @@ export const ADAPTER_LIBRARY = [
         { type: 'poly', points: [{ x: 10.2594, y: 7.05 }, { x: 10.5406, y: 7.05 }] },
       ],
 
-      silkText :[
-        {text: 'ABC', rotation: 0, x: 5, y: 1, height: 0.8},
-        {text: '123', rotation: 90, x: 7, y: 2, height: 0.8},
+    silkText: [
+        { type: 'text', text: 'C2', x: 6.5, y: 2, height: 0.8, rotation: 0 },
+        { type: 'text', text: 'R61', x: 9.3, y: 7.89, height: 0.8, rotation: 90 },
+        { type: 'text', text: 'L1', x: 2.2, y: 12.2, height: 0.8, rotation: 0 },
+        { type: 'text', text: 'C1', x: 2.5, y: 4.5, height: 0.8, rotation: 0 },
+        { type: 'text', text: 'C58', x: 7.5, y: 8.92, height: 0.8, rotation: 0 },
+        { type: 'text', text: 'R25', x: 7.5, y: 7.89, height: 0.8, rotation: 90 },
+        { type: 'text', text: 'C1', x: 8.8, y: 12.51, height: 0.8, rotation: 0 },
+        { type: 'text', text: 'U1', x: 9, y: 5, height: 0.8, rotation: 0 },
+        { type: 'text', text: 'C13', x: 10.4, y: 8.99, height: 0.8, rotation: 0 },
       ],
     },
 
@@ -1556,7 +1563,14 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
       return { type: 'circle', x: p.x, y: p.y, d: f.d };
     } else if (f.type === 'poly') {
       return { type: 'poly', points: f.points.map(pt => rotPt(pt.x, pt.y)) };
+    } else if (f.type === 'text') {
+      const p = rotPt(f.x, f.y);
+      const baseRot = f.rotation || 0;
+      // Each 90° adapter rotation toggles the label orientation
+      const labelRot = (r % 2 === 0) ? baseRot : (baseRot === 90 ? 0 : 90);
+      return { type:'text', text: f.text, x: p.x, y: p.y, rotation: labelRot };
     }
+
     return f;
   }
 
@@ -1584,6 +1598,7 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
       }) : undefined,
       mask: adapter.features.mask.map(rotFeature),
       silk: adapter.features.silk.map(rotFeature),
+      silkText: adapter.features.silkText.map(rotFeature),
     },
   };
 }
@@ -1620,5 +1635,6 @@ export function getAdapterFeatures(adapter, inst, gridLeft, gridBottom, pitch) {
     copper: adapter.features.copper.map(offsetFeature),
     mask: adapter.features.mask.map(offsetFeature),
     silk: adapter.features.silk.map(offsetFeature),
+    silkText: adapter.features.silkText.map(offsetFeature),
   };
 }
