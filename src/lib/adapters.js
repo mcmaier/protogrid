@@ -1597,8 +1597,8 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
         return { ...d, x: p.x, y: p.y };
       }) : undefined,
       mask: adapter.features.mask.map(rotFeature),
-      silk: adapter.features.silk.map(rotFeature),
-      silkText: adapter.features.silkText.map(rotFeature),
+      silk: adapter.features.silk ? adapter.features.silk.map(rotFeature) : undefined,
+      silkText: adapter.features.silkText ? adapter.features.silkText.map(rotFeature) : undefined,
     },
   };
 }
