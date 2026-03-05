@@ -26,22 +26,42 @@
  *   { type: 'trace', x1, y1, x2, y2, w } – copper trace
  *   { type: 'poly', points: [{x,y}...] } – silkscreen polyline
  *
- * Layout principle:
- *   SMD footprint centered within reserved grid rectangle.
- *   Interface TH pads on outer edges. Fanout traces connect
- *   SMD pads to TH pads via multi-segment routes (stub → diagonal → horizontal).
- *   Inner grid positions blocked to prevent overlap with SMD features.
- *
- * Package reference data:
- *   SOT-23:  body 2.9×1.3mm, pitch 0.95mm, pad 1.0×0.6mm
- *   SC-70:   body 2.0×1.25mm, pitch 0.65mm, pad 0.8×0.5mm
- *   SOIC:    body 3.9mm wide, pitch 1.27mm, pad 1.5×0.6mm
- *   SOIC-W:  body 7.5mm wide, pitch 1.27mm, pad 1.5×0.6mm
- *   TSSOP:   body 4.4mm wide, pitch 0.65mm, pad 1.1×0.4mm
- *   MSOP:    body 3.0mm wide, pitch 0.65mm, pad 1.0×0.4mm
  */
 
 export const ADAPTER_LIBRARY = [
+    {
+      id: 'rail-bridge',
+      name: 'Powerrail-Bridge',
+      category: 'Passive',
+      pitch: 2.54,
+      color: '#606060',
+
+      throughPins: [
+        { col: 0, row: 0, label: '1' },
+        { col: 1, row: 0, label: '2' },
+        { col: 2, row: 0, label: '3' },
+      ],
+
+      features: {
+        copper: [],
+        copperBack: [
+          // F.Cu traces
+          { type: 'trace', x1: 0, y1: 0, x2: 1.5, y2: 1.3, w: 0.4 },
+          { type: 'trace', x1: 1.5, y1: 1.3, x2: 3.5, y2: 1.3, w: 0.4 },
+          { type: 'trace', x1: 3.5, y1: 1.3, x2: 5.08, y2: 0, w: 0.4 },
+        ],
+        mask: [
+        ],
+        silk: [
+        ],
+      },
+
+      outline: { width: 7.1, height: 2 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 3,
+      heightPins: 1,
+    },
+
     {
     id: 'padgrid',
     name: 'SMD Pad Grid 6x5 for 0402',
