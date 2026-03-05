@@ -110,6 +110,14 @@
   function toggleSignalTrackDrawMode() {
     signalTrackDrawMode = !signalTrackDrawMode;
   }
+
+  function clearCustomSignalTracks() {
+    config = {
+      ...config,
+      signalTracks: [],
+    };
+    signalTrackDrawMode = false;
+  }
 </script>
 
 <div use:fullscreen={{toggle: toggleFullscreen}} class="ppp-app" id="main-app">
@@ -132,7 +140,7 @@
 
   <div class="ppp-layout">
     <aside class="ppp-sidebar">
-      <Controls bind:config onExport={handleExport} onSaveProject={handleSaveProject} onLoadProject={handleLoadProject} {resolvedAdapters} signalTrackDrawMode={signalTrackDrawMode} onToggleSignalTrackDrawMode={toggleSignalTrackDrawMode} />
+      <Controls bind:config onExport={handleExport} onSaveProject={handleSaveProject} onLoadProject={handleLoadProject} {resolvedAdapters} signalTrackDrawMode={signalTrackDrawMode} onToggleSignalTrackDrawMode={toggleSignalTrackDrawMode} onDeleteCustomTracks={clearCustomSignalTracks} />
     </aside>
     <main class="ppp-main">
       <ModuleToolbar bind:modules bind:adapters {config} {selectedInstanceId} {onSelect} />

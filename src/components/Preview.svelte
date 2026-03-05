@@ -275,6 +275,7 @@
           }
           signalTrackStart = null;
           signalTrackHover = null;
+          signalTrackDrawMode = false;
         }
         return;
       }

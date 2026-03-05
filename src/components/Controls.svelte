@@ -1,7 +1,7 @@
 <script>
   import { computeSignalGrid, computeMinSize, BOARD_MIN_WIDTH, BOARD_MAX_WIDTH, BOARD_MIN_HEIGHT, BOARD_MAX_HEIGHT, MOUNT_EDGE_MIN, MOUNT_EDGE_MAX } from '../lib/gerber.js';
 
-  let { config = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [], signalTrackDrawMode = $bindable(), onToggleSignalTrackDrawMode = $bindable() } = $props();
+  let { config = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [], signalTrackDrawMode = $bindable(), onToggleSignalTrackDrawMode = $bindable(), onDeleteCustomTracks } = $props();
 
   let minSize = $derived(computeMinSize(config.pitch, config.powerRails, config.mountingHoles));
   let effMinW = $derived(Math.max(BOARD_MIN_WIDTH, minSize.minWidth));
@@ -21,6 +21,7 @@
 
   let trackDrawMode = $derived(signalTrackDrawMode);
   let trackDrawModeToggle = $derived(onToggleSignalTrackDrawMode);
+  let customTrackCount = $derived((config.signalTracks || []).length);
 
   $effect(() => {
     if (config.width !== lastWidth) {
@@ -196,9 +197,14 @@
   </div>
 
   <div class="control-group">
-    <button class="rail-btn" class:active={trackDrawMode} onclick={trackDrawModeToggle}>
-      Draw Signal Tracks
-    </button>
+    <div class="track-actions">
+      <button class="rail-btn" class:active={trackDrawMode} onclick={trackDrawModeToggle}>
+        Draw Signal Tracks
+      </button>
+      <button class="rail-btn track-delete-btn" onclick={onDeleteCustomTracks} disabled={customTrackCount === 0}>
+        Delete Tracks ({customTrackCount})
+      </button>
+    </div>
   </div>
 
   <div class="control-group">
@@ -358,6 +364,27 @@
   }
   .rail-btn:hover { background: #45475a; }
   .rail-btn.active { background: #89b4fa22; border-color: #89b4fa; color: #89b4fa; }
+
+  .track-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .track-actions .rail-btn {
+    flex: 1;
+  }
+
+  .track-delete-btn {
+    flex: 0.7 !important;
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+
+  .track-delete-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 
   .info {
     display: flex; justify-content: space-between;
