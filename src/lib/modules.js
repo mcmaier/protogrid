@@ -30,13 +30,14 @@ export const MODULE_LIBRARY = [
     name: 'ESP32 DevKit (30-pin)',
     category: 'Microcontroller',
     pitch: 2.54,
-    widthPins: 11,    // across (pin-to-pin)
+    widthPins: 10,    // across (pin-to-pin)
     heightPins: 15,   // along (pins per side)
     pinRows: [
       { x: 0, y: 0, count: 15, dx: 0, dy: 1 },   // left column
-      { x: 10, y: 0, count: 15, dx: 0, dy: 1 },   // right column
+      { x: 9, y: 0, count: 15, dx: 0, dy: 1 },   // right column
     ],
-    outline: { width: 25.4, height: 48.3 },
+    outline: { width: 27.5, height:48.5 },
+    outlineOffset: { x: 0, y: -1.2 },  // body extends above the pin row
     color: '#e06030',
     overlay: true,
   },

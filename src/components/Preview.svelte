@@ -800,7 +800,7 @@
           {@const cy = imgY + outH / 2}
           {@const origW = modDef.outline.width}
           {@const origH = modDef.outline.height}
-          <g transform="translate({cx},{cy}) scale(1,-1) rotate({-rot * 90})">
+          <g transform="translate({cx},{cy}) scale(1,-1) rotate({rot * 90})">
             <image
               href={overlayUrl}
               x={-origW / 2}
