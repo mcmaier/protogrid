@@ -578,7 +578,7 @@ function AdapterEditor() {
     if (silkText.length > 0) {
       c += `      silkText: [\n`;
       silkText.forEach(t => {
-        c += `        { text: '${t.text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}', x: ${roundTo(t.x + ox, 4)}, y: ${roundTo(t.y + oy, 4)}, height: ${t.height || 1}, rotation: ${t.rotation || 0} },\n`;
+        c += `        { type: 'text', text: '${t.text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}', x: ${roundTo(t.x + ox, 4)}, y: ${roundTo(t.y + oy, 4)}, height: ${t.height || 1}, rotation: ${t.rotation || 0} },\n`;
       });
       c += `      ],\n`;
     }
@@ -919,6 +919,26 @@ function AdapterEditor() {
               strokeWidth: 1.2,
               opacity: 0.8,
             });
+          }),
+
+          // Silkscreen reference text preview
+          adapter.silkText.map((t, ti) => {
+            const s = toScreen(t.x + adapter.originOffset.x, t.y + adapter.originOffset.y);
+            const fontPx = Math.max((t.height || 1) * pxPerMm, 9);
+            const rotation = t.rotation || 0;
+            return React.createElement("text", {
+              key: `st${ti}`,
+              x: s.sx,
+              y: s.sy,
+              textAnchor: "middle",
+              dominantBaseline: "middle",
+              fill: COLORS.silk,
+              fontSize: fontPx,
+              fontFamily: "monospace",
+              transform: `rotate(${-rotation} ${s.sx} ${s.sy})`,
+              opacity: 0.9,
+              style: { pointerEvents: "none" },
+            }, t.text);
           }),
 
           /*
