@@ -1,10 +1,11 @@
 <script>
   import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, RAIL_TRACE_WIDTH, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
-  import { getRotatedModule } from '../lib/modules.js';
+  import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY } from '../lib/modules.js';
   import { getRotatedAdapter } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
-  let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable(), selectedSignalTrackIndex = null, onSelectSignalTrack } = $props();
+  let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable(), selectedSignalTrackIndex = null, onSelectSignalTrack, showOverlays = true } = $props();
+
   let fullConfig = $derived({
     ...config,
   });
@@ -749,6 +750,8 @@
       {@const ofsY = (outH - pinH) / 2 - oOfs.y}
       {@const outCx = m.x - ofsX + outW / 2}
       {@const outCy = m.y - ofsY + outH / 2}
+      {@const modDef = MODULE_LIBRARY.find(md => md.id === inst.moduleId)}
+      {@const overlayUrl = getModuleOverlayUrl(modDef)}
 
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <g
@@ -786,6 +789,29 @@
           stroke-dasharray="1 0.5"
           rx="0.5"
         />
+
+        <!-- Module PNG overlay (pinout diagram) -->
+
+        {#if showOverlays && overlayUrl}
+          {@const imgX = m.x - ofsX}
+          {@const imgY = m.y - ofsY}
+          {@const rot = (inst.rotation || 0) % 4}
+          {@const cx = imgX + outW / 2}
+          {@const cy = imgY + outH / 2}
+          {@const origW = modDef.outline.width}
+          {@const origH = modDef.outline.height}
+          <g transform="translate({cx},{cy}) scale(1,-1) rotate({-rot * 90})">
+            <image
+              href={overlayUrl}
+              x={-origW / 2}
+              y={-origH / 2}
+              width={origW}
+              height={origH}
+              preserveAspectRatio="xMidYMid meet"
+              opacity="0.85"
+            />
+          </g>
+        {/if}
 
         <!-- Pin markers -->
         {#each m.rm.pins as pin}
