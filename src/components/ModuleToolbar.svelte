@@ -1,6 +1,6 @@
 <script>
   import { MODULE_LIBRARY } from '../lib/modules.js';
-  import { ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID } from '../lib/adapters.js';
+  import { ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch } from '../lib/adapters.js';
 
   let { modules = $bindable(), adapters = $bindable(), config, selectedInstanceId, onSelect, showModuleOverlays = $bindable(), showAdapterOverlays = $bindable() } = $props();
   let selectedModuleId = $state('');
@@ -127,6 +127,15 @@ function addModule() {
     if (selectedInstanceId === instanceId) onSelect(null);
   }
 
+  // ToDo - make it work
+  function changeAdapterGrid(instanceId) {
+    adapters = adapters.map(a =>
+      a.id === instanceId
+        ? { cycleVariableSubgridPitch}
+        : a
+    );
+  }
+
   function clearAll() {
     onSelect(null);
     adapters = [];
@@ -202,7 +211,9 @@ function addModule() {
           onkeydown={(e) => { if (e.key === 'Enter') onSelect(selectedInstanceId === inst.id ? null : inst.id); }}
           role="button" tabindex="0">
           <span class="chip-name">⚡{inst.name}</span>
-           {#if inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID}
+           {#if inst.adapterId === VARIABLE_SUBGRID_ADAPTER_ID}            
+            <button class="chip-action" onclick={(e) => { e.stopPropagation(); changeAdapterGrid(inst.id); }} title="Change Pitch (Space)">#</button>
+            {:else}
             <button class="chip-action" onclick={(e) => { e.stopPropagation(); rotateAdapter(inst.id); }} title="Rotate (Space)">↻</button>
           {/if}          
           <button class="chip-action chip-remove" onclick={(e) => { e.stopPropagation(); removeAdapter(inst.id); }} title="Remove (Del)">×</button>

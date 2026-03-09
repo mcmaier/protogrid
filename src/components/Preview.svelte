@@ -1,7 +1,7 @@
 <script>
   import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, RAIL_TRACE_WIDTH, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
   import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY } from '../lib/modules.js';
-  import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID } from '../lib/adapters.js';
+  import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch  } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
   let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable(), selectedSignalTrackIndex = null, onSelectSignalTrack, showAdapterOverlays = true , showModuleOverlays = true } = $props();
@@ -661,7 +661,7 @@
       return;
     }
 
-        // Space: rotate selected module/adapter by 90°
+        // Space: rotate selected module/adapter by 90° or cycle pitch of subgrid
     if (e.key === ' ' && selectedInstanceId !== null) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
       e.preventDefault();
@@ -670,8 +670,12 @@
         modules = modules.map(m => m.id === selectedInstanceId
           ? { ...m, rotation: ((m.rotation || 0) + 1) % 4 } : m);
       } else {
-        adapters = adapters.map(a => a.id === selectedInstanceId
-          ? { ...a, rotation: ((a.rotation || 0) + 1) % 4 } : a);
+        adapters = adapters.map(a => {
+          if (a.id !== selectedInstanceId) return a;
+          return a.adapterId === VARIABLE_SUBGRID_ADAPTER_ID
+            ? cycleVariableSubgridPitch(a)
+            : { ...a, rotation: ((a.rotation || 0) + 1) % 4 };
+        });
       }
       return;
     }

@@ -53,7 +53,7 @@ export const ADAPTER_LIBRARY = [
       widthPins: 4,
       heightPins: 4,
       isResizable: true,
-      subGridPitches: [1.27, 1.27],
+      subGridPitches: [2.00, 1.27],
     },
 
     {
@@ -1795,6 +1795,25 @@ export function getAdapterForInstance(inst) {
       silkText: [],
       drills: subgridDrills,
     },
+  };
+}
+
+export function cycleVariableSubgridPitch(inst) {
+  if (!inst || inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) return inst;
+
+  const adapter = getAdapter(VARIABLE_SUBGRID_ADAPTER_ID);
+  const pitches = adapter?.subGridPitches;
+  if (!Array.isArray(pitches) || pitches.length === 0) return inst;
+
+  const currentPitch = Number(inst.subGridPitch ?? pitches[0]);
+  const currentIndex = pitches.findIndex(pitch => Math.abs(pitch - currentPitch) < 0.0001);
+  const nextIndex = currentIndex >= 0
+    ? (currentIndex + 1) % pitches.length
+    : 0;
+
+  return {
+    ...inst,
+    subGridPitch: pitches[nextIndex],
   };
 }
 
