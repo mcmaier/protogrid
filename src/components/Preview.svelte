@@ -252,13 +252,15 @@
     }
   }
 
+  let resizing = $state(null); // { instanceId, corner, startCol, startRow, startWidthPins, startHeightPins, anchorCol, anchorRow, anchorX, anchorY, startX, startY }
 
-
-  let resizing = $state(null); // { instanceId, corner, startCol, startRow, startWidthPins, startHeightPins, anchorCol, anchorRow, startX, startY }
-
-  function getAdapterMinColAndRow(anchorCol, anchorRow, widthPins, heightPins) {
-    const col = Math.min(anchorCol, anchorCol - (widthPins - 1));
-    const row = Math.min(anchorRow, anchorRow - (heightPins - 1));
+  function getAdapterMinColAndRow(anchorCol, anchorRow, widthPins, heightPins, anchorX, anchorY) {
+    const col = anchorX === 'left'
+      ? anchorCol
+      : anchorCol - (widthPins - 1);
+    const row = anchorY === 'bottom'
+      ? anchorRow
+      : anchorRow - (heightPins - 1);
     return { col, row };
   }
 
@@ -273,8 +275,10 @@
     const startHeightPins = Math.max(1, Math.round(inst.heightPins || 4));
     const pt = getSvgPoint(e);
 
-    const anchorCol = corner.includes('right') ? inst.col : inst.col + startWidthPins - 1;
-    const anchorRow = corner.includes('top') ? inst.row : inst.row + startHeightPins - 1;
+    const anchorX = corner.includes('right') ? 'left' : 'right';
+    const anchorY = corner.includes('bottom') ? 'top' : 'bottom';
+    const anchorCol = anchorX === 'left' ? inst.col : inst.col + startWidthPins - 1;
+    const anchorRow = anchorY === 'bottom' ? inst.row : inst.row + startHeightPins - 1;
 
     resizing = {
       instanceId: inst.id,
@@ -285,6 +289,8 @@
       startHeightPins,
       anchorCol,
       anchorRow,
+      anchorX,
+      anchorY,
       startX: pt.x,
       startY: pt.y,
     };
@@ -308,7 +314,14 @@
     widthPins = Math.max(1, widthPins);
     heightPins = Math.max(1, heightPins);
 
-    let { col, row } = getAdapterMinColAndRow(resizing.anchorCol, resizing.anchorRow, widthPins, heightPins);
+    let { col, row } = getAdapterMinColAndRow(
+      resizing.anchorCol,
+      resizing.anchorRow,
+      widthPins,
+      heightPins,
+      resizing.anchorX,
+      resizing.anchorY,
+    );
 
     const maxWidth = grid.cols;
     const maxHeight = grid.rows;
@@ -342,6 +355,11 @@
     window.removeEventListener('pointerup', onResizePointerUp);
     window.removeEventListener('touchmove', onTouchMove);
   }
+
+  function getResizeCursor(corner) {
+    return corner === 'top-left' || corner === 'bottom-right' ? 'nwse-resize' : 'nesw-resize';
+  }
+
 
   function onPointerUp() {
     dragging = null;
@@ -844,8 +862,7 @@
       stroke-linejoin="round"
       fill="none"
     />
-     {/each}
-  
+     {/each}  
   
   <!-- Adapter overlays (real Gerber features) -->
   {#each sortedAdapters as inst (inst.id)}
@@ -968,7 +985,6 @@
           {/each}
         {/if}
         
-        {#if isSelected}
           <!-- Corner markers at adapter boundary (pointing inward) -->
           {#each [
             { key: 'top-left', col: 0, row: 0, dx: 1, dy: 1 },
@@ -982,22 +998,8 @@
             {@const vy = cy - corner.dy * 1.1}
             <path d="M {vx} {vy} L {vx + corner.dx * 1.3} {vy} M {vx} {vy} L {vx} {vy + corner.dy * 1.3}"
               stroke="#e8e8e8" stroke-width="0.15" stroke-linecap="round"
-              fill="none" opacity="0.7" />
-
-            {#if inst.adapterId === VARIABLE_SUBGRID_ADAPTER_ID}
-              <circle
-                cx={cx}
-                cy={cy}
-                r="0.55"
-                fill="#f9e2af"
-                stroke="#1a1a1a"
-                stroke-width="0.18"
-                onpointerdown={(e) => onResizeHandlePointerDown(e, inst, corner.key)}
-                style="cursor: nwse-resize;"
-              />
-            {/if}
-          {/each}
-        {/if}
+              fill="none" opacity="0.7" />            
+        {/each}
 
         
         <!-- Adapter PNG overlay -->
@@ -1158,6 +1160,26 @@
           onpointerdown={(e) => onItemPointerDown(e, inst, 'adapter')}
           style="cursor: grab;"
         />
+
+        {#if inst.adapterId === VARIABLE_SUBGRID_ADAPTER_ID}
+          {#each [
+            { key: 'bottom-left', col: 0, row: 0 },
+            { key: 'bottom-right', col: a.def.widthPins - 1, row: 0 },
+            { key: 'top-left', col: 0, row: a.def.heightPins - 1 },
+            { key: 'top-right', col: a.def.widthPins - 1, row: a.def.heightPins - 1 },
+          ] as corner}
+            <circle
+              cx={a.x + corner.col * a.pitch}
+              cy={a.y + corner.row * a.pitch}
+              r="0.55"
+              fill="#f9e2af"
+              stroke="#1a1a1a"
+              stroke-width="0.18"
+              onpointerdown={(e) => onResizeHandlePointerDown(e, inst, corner.key)}
+              style="cursor: {getResizeCursor(corner.key)};"
+            />
+          {/each}
+        {/if}
       {/if}
     {/each}
   {/if}

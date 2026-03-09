@@ -200,7 +200,9 @@ function addModule() {
           onkeydown={(e) => { if (e.key === 'Enter') onSelect(selectedInstanceId === inst.id ? null : inst.id); }}
           role="button" tabindex="0">
           <span class="chip-name">⚡{inst.name}</span>
-          <button class="chip-action" onclick={(e) => { e.stopPropagation(); rotateAdapter(inst.id); }} title="Rotate (Space)">↻</button>
+           {#if inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID}
+            <button class="chip-action" onclick={(e) => { e.stopPropagation(); rotateAdapter(inst.id); }} title="Rotate (Space)">↻</button>
+          {/if}          
           <button class="chip-action chip-remove" onclick={(e) => { e.stopPropagation(); removeAdapter(inst.id); }} title="Remove (Del)">×</button>
         </div>
       {/each}
