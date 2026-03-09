@@ -92,12 +92,25 @@ const ROUNDRECT_RATIO = 0.2;
  * @param {number} h - Total pad height
  * @returns {string} Gerber aperture definition line
  */
-function roundRectAperture(num, w, h) {
+function roundRectAperture(num, w, h, rotation = 0) {
   const r = Math.min(w, h) * ROUNDRECT_RATIO;
   const hw = w / 2 - r; // half-width of inner rect
   const hh = h / 2 - r; // half-height of inner rect
-  // Corners CCW: top-left, bottom-left, bottom-right, top-right
-  return `%ADD${num}RoundRect,${r.toFixed(6)}X${(-hw).toFixed(6)}X${hh.toFixed(6)}X${(-hw).toFixed(6)}X${(-hh).toFixed(6)}X${hw.toFixed(6)}X${(-hh).toFixed(6)}X${hw.toFixed(6)}X${hh.toFixed(6)}X0*%\n`;
+  
+  // Corner points CCW: top-left, bottom-left, bottom-right, top-right
+  let corners = [[-hw, hh], [-hw, -hh], [hw, -hh], [hw, hh]];
+  
+  // Pre-rotate corners (KiCad approach: rotate geometry, not macro parameter)
+  // This ensures compatibility with all Gerber viewers
+  if (Math.abs(rotation) > 0.01) {
+    const rad = rotation * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    corners = corners.map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
+  }
+  
+  const fmt = (v) => v.toFixed(6);
+  const pts = corners.map(([x, y]) => `${fmt(x)}X${fmt(y)}`).join('X');
+  return `%ADD${num}RoundRect,${fmt(r)}X${pts}X0*%\n`;
 }
 
 const GERBER_FOOTER = `M02*\n`;
@@ -659,6 +672,12 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
   const rectApertures = new Map();
   const thSeen = new Set(); // deduplicate through-hole positions
   let nextAperture = 40;
+  
+  // Aperture key for SMD pads: includes rotation so 45° pads get separate apertures
+  function padKey(w, h, rotation) {
+    const rot = rotation || 0;
+    return rot ? `${w.toFixed(4)},${h.toFixed(4)},${rot}` : `${w.toFixed(4)},${h.toFixed(4)}`;
+  }
 
   const isTopLayer = layerName === 'F.Cu';
 
@@ -672,7 +691,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
     // F.Cu: render SMD pads and fanout traces
     for (const f of adapter.features.copper) {
       if (f.type === 'pad') {
-        const key = `${f.w.toFixed(4)},${f.h.toFixed(4)}`;
+        const key = padKey(f.w, f.h, f.rotation);
         if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);        
         adapterFeatures.push({
           type: 'pad', x: originX + f.x, y: originY + f.y,
@@ -698,7 +717,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
         if (adapter.features.copperBack) {
           for (const f of adapter.features.copperBack) {
             if (f.type === 'pad') {
-              const key = `${f.w.toFixed(4)},${f.h.toFixed(4)}`;
+              const key = padKey(f.w, f.h, f.rotation);
               if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
               adapterFeatures.push({
                 type: 'pad', x: originX + f.x, y: originY + f.y,
@@ -791,16 +810,12 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
       const s = parseFloat(key.slice(1));
       gerber += `%ADD${num}R,${s.toFixed(6)}X${s.toFixed(6)}*%\n`;
     } else {
-      // SMD pad — use RoundRect
-      const [w, h] = key.split(',').map(Number);
-      gerber += roundRectAperture(num, w, h);
+      // SMD pad — use RoundRect (key format: "w,h" or "w,h,rotation")
+      const parts = key.split(',').map(Number);
+      const [w, h] = parts;
+      const rotation = parts[2] || 0;
+      gerber += roundRectAperture(num, w, h, rotation);
     }
-
-    /*
-      else {  
-      const [w, h] = key.split(',').map(Number);
-      gerber += `%ADD${num}R,${w.toFixed(6)}X${h.toFixed(6)}*%\n`;
-    }*/
   }
 
   // Flash grid pads
@@ -868,6 +883,11 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
   const adapterMask = [];
   const maskThSeen = new Set();
   
+  function padKey(w, h, rotation) {
+    const rot = rotation || 0;
+    return rot ? `${w.toFixed(4)},${h.toFixed(4)},${rot}` : `${w.toFixed(4)},${h.toFixed(4)}`;
+  }
+  
   const isTopMask = layerName === 'F.Mask';
 
   for (const inst of placedAdapters) {
@@ -880,7 +900,7 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
     // F.Mask: SMD pad mask openings from adapter features
     for (const f of adapter.features.mask) {
       if (f.type === 'pad') {
-        const key = `${f.w.toFixed(4)},${f.h.toFixed(4)}`;
+        const key = padKey(f.w, f.h, f.rotation);
         if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
         adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key) });
       }
@@ -975,9 +995,11 @@ for (const pin of adapter.throughPins) {
       const s = parseFloat(key.slice(1));
       gerber += `%ADD${num}R,${s.toFixed(6)}X${s.toFixed(6)}*%\n`;
     } else {
-      // SMD pad mask — use RoundRect
-      const [w, h] = key.split(',').map(Number);
-      gerber += roundRectAperture(num, w, h);
+      // SMD pad mask — use RoundRect (key format: "w,h" or "w,h,rotation")
+      const parts = key.split(',').map(Number);
+      const [w, h] = parts;
+      const rotation = parts[2] || 0;
+      gerber += roundRectAperture(num, w, h, rotation);
     }
   }
 

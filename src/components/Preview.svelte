@@ -827,7 +827,8 @@
         {#each a.def.features.copper as f_p}
           {#if f_p.type === 'pad'}
             <rect x={a.x + f_p.x - f_p.w / 2} y={a.y + f_p.y - f_p.h / 2}
-              width={f_p.w} height={f_p.h} fill="#c8a84e" fill-opacity="0.9" rx="0.15" ry="0.15"/>
+              width={f_p.w} height={f_p.h} fill="#c8a84e" fill-opacity="0.9" rx="0.15" ry="0.15"
+              transform={f_p.rotation ? `rotate(${f_p.rotation}, ${a.x + f_p.x}, ${a.y + f_p.y})` : undefined}/>
           {/if}
         {/each} 
 

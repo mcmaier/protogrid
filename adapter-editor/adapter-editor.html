@@ -157,22 +157,20 @@ function parseKicadPcb(text) {
       const layers = [pm[10], pm[11], pm[12]].filter(Boolean);
 
       // Absolute position: rotate pad pos by footprint rotation
-      const ax = fx + px * cosR - py * sinR;
+      const ax = fx - px * cosR + py * sinR;
       const ay = fy + px * sinR + py * cosR;
 
-      // Swap w/h based on absolute pad orientation
-      // KiCad stores pad rotation as absolute (world-relative) when footprint is rotated
-      // So the pad's own rotation already accounts for footprint rotation
-      const norm = ((pDeg % 360) + 360) % 360;
-      if (Math.abs(norm - 90) < 1 || Math.abs(norm - 270) < 1) {
-        [sw, sh] = [sh, sw];
-      }
+      // KiCad stores pad rotation as absolute (world-relative).
+      // With RoundRect Gerber macro, rotation is handled natively — no w/h swap needed.
+      // Normalize to 0-180° range (rectangular pads are symmetric at 180°).
+      const norm = (360 - pDeg) % 360;
+      const padRotation = roundTo(norm % 180, 1);
 
       // Board-relative coords (Y still KiCad-down at this point)
       const rx = roundTo(ax - boardLeft, 4);
       const ry = roundTo(ay - boardTop, 4);
 
-      const padData = { pin, fp: fpName, type: ptype, shape: pshape, x: rx, y: ry, w: roundTo(sw,4), h: roundTo(sh,4), drill };
+      const padData = { pin, fp: fpName, type: ptype, shape: pshape, x: rx, y: ry, w: roundTo(sw,4), h: roundTo(sh,4), drill, rotation: padRotation > 0.5 ? roundTo(padRotation, 1) : 0 };
 
       if (ptype === "thru_hole" || layers.includes("F.Cu") && layers.includes("B.Cu")) {
         fcuPads.push(padData);
@@ -224,9 +222,9 @@ function parseKicadPcb(text) {
       const lx1 = parseFloat(sm[1]), ly1 = parseFloat(sm[2]);
       const lx2 = parseFloat(sm[3]), ly2 = parseFloat(sm[4]);
 
-      const x1 = baseX + lx1 * cosR - ly1 * sinR;
+      const x1 = baseX - lx1 * cosR + ly1 * sinR;
       const y1 = baseY + lx1 * sinR + ly1 * cosR;
-      const x2 = baseX + lx2 * cosR - ly2 * sinR;
+      const x2 = baseX - lx2 * cosR + ly2 * sinR;
       const y2 = baseY + lx2 * sinR + ly2 * cosR;
 
       silkLines.push({
@@ -351,10 +349,12 @@ function kicadPcbToAdapter(parsed) {
   const flipY = (y) => roundTo(boardH - y, 4);
 
   // Convert pads (F.Cu only for display, numbered by position)
+  // KiCad CW rotation in Y-down becomes CCW in Y-up after flip — matches Gerber convention directly
   const smdPads = fcuPads.map((p, i) => ({
     pin: parseInt(p.pin) || (i + 1),
     x: p.x, y: flipY(p.y),
     w: p.w, h: p.h,
+    rotation: -p.rotation || 0,
     fp: p.fp, netPin: p.pin,
   }));
 
@@ -540,7 +540,7 @@ function AdapterEditor() {
     c += `    throughPins: [\n`;
     throughPins.forEach(tp => { c += `      { col: ${tp.col}, row: ${tp.row}, label: '${tp.label}' },\n`; });
     c += `    ],\n\n    features: {\n      copper: [\n        // SMD pads\n`;
-    smdPads.forEach(p => { c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${p.w}, h: ${p.h} },   // Pin ${p.pin}\n`; });
+    smdPads.forEach(p => { const rot = p.rotation ? `, rotation: ${p.rotation}` : ''; c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${p.w}, h: ${p.h}${rot} },   // Pin ${p.pin}\n`; });
     c += `\n        // F.Cu traces\n`;
     traces.forEach(t => { t.segments.forEach(s => { c += `        { type: 'trace', x1: ${roundTo(s.x1 + ox, 4)}, y1: ${roundTo(s.y1 + oy, 4)}, x2: ${roundTo(s.x2 + ox, 4)}, y2: ${roundTo(s.y2 + oy, 4)}, w: ${s.w} },\n`; }); });
     c += `      ],\n`;
@@ -560,7 +560,7 @@ function AdapterEditor() {
     }
 
     c += `      mask: [\n`;
-    smdPads.forEach(p => { c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${roundTo(p.w + maskExpansion * 2, 4)}, h: ${roundTo(p.h + maskExpansion * 2, 4)} },\n`; });
+    smdPads.forEach(p => { const rot = p.rotation ? `, rotation: ${p.rotation}` : ''; c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${roundTo(p.w + maskExpansion * 2, 4)}, h: ${roundTo(p.h + maskExpansion * 2, 4)}${rot} },\n`; });
     c += `      ],\n      silk: [\n`;
     if (silkBody && silkBody.length > 2) {
       c += `        { type: 'poly', points: [\n`;
@@ -740,6 +740,7 @@ function AdapterEditor() {
             `Pos: (${adapter.smdPads[selectedPad].x}, ${adapter.smdPads[selectedPad].y})`,
             React.createElement("br"),
             `Size: ${adapter.smdPads[selectedPad].w} × ${adapter.smdPads[selectedPad].h} mm`,
+            adapter.smdPads[selectedPad].rotation ? [React.createElement("br"), `Rotation: ${adapter.smdPads[selectedPad].rotation}°`] : null,
             React.createElement("br"),
             `Export: (${roundTo(adapter.smdPads[selectedPad].x + adapter.originOffset.x, 4)}, ${roundTo(adapter.smdPads[selectedPad].y + adapter.originOffset.y, 4)})`,
           ),
@@ -821,9 +822,10 @@ function AdapterEditor() {
           adapter.smdPads.map((p, i) => {
             const { sx, sy } = toScreen(p.x + adapter.originOffset.x, p.y + adapter.originOffset.y);
             const w = p.w * pxPerMm, h = p.h * pxPerMm;
-            return React.createElement("g", { key: `p${i}` },
+            const rot = p.rotation || 0;
+            return React.createElement("g", { key: `p${i}`, transform: rot ? `rotate(${-rot}, ${sx}, ${sy})` : undefined },
               React.createElement("rect", { x: sx - w / 2, y: sy - h / 2, width: w, height: h, fill: COLORS.smdPad, stroke: selectedPad === i ? COLORS.highlight : COLORS.smdPadStroke, strokeWidth: selectedPad === i ? 2 : 0.5, rx: 1 }),
-              React.createElement("text", { x: sx, y: sy + 0.15 * pxPerMm, textAnchor: "middle", fill: "#000", fontSize: Math.min(0.35 * pxPerMm, 11), fontFamily: "monospace", fontWeight: "bold", style: { pointerEvents: "none" } }, p.pin),
+              React.createElement("text", { x: sx, y: sy + 0.15 * pxPerMm, textAnchor: "middle", fill: "#000", fontSize: Math.min(0.35 * pxPerMm, 11), fontFamily: "monospace", fontWeight: "bold", style: { pointerEvents: "none" }, transform: rot ? `rotate(${rot}, ${sx}, ${sy})` : undefined }, p.pin),
             );
           }),
 
