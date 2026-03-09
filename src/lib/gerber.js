@@ -15,6 +15,7 @@
  */
 
 import { getTextStrokes, colLabel } from './font.js';
+import { VARIABLE_SUBGRID_ADAPTER_ID } from './adapters.js';
 
 // ─── Configurable constants ───────────────────────────────────────────
 /** Number of grid rows/cols used per rail (VCC + GND) */
@@ -686,92 +687,92 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
     if (!adapter) continue;
     const originX = gridLeft + inst.col * pitch;
     const originY = gridBottom + inst.row * pitch;
-
+   
     if (isTopLayer) {
-    // F.Cu: render SMD pads and fanout traces
-    for (const f of adapter.features.copper) {
-      if (f.type === 'pad') {
-        const key = padKey(f.w, f.h, f.rotation);
-        if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);        
-        adapterFeatures.push({
-          type: 'pad', x: originX + f.x, y: originY + f.y,
-          aperture: rectApertures.get(key),
-        });
-      } else if (f.type === 'trace') {
-        const key = `T${f.w.toFixed(4)}`;
-        if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
-         adapterFeatures.push({
-          type: 'trace',
-          x1: originX + f.x1, y1: originY + f.y1,
-          x2: originX + f.x2, y2: originY + f.y2,
-          aperture: rectApertures.get(key),
-        });
+      // F.Cu: render SMD pads and fanout traces
+      for (const f of adapter.features.copper) {
+        if (f.type === 'pad') {
+          const key = padKey(f.w, f.h, f.rotation);
+          if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);        
+          adapterFeatures.push({
+            type: 'pad', x: originX + f.x, y: originY + f.y,
+            aperture: rectApertures.get(key),
+          });
+        } else if (f.type === 'trace') {
+          const key = `T${f.w.toFixed(4)}`;
+          if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+          adapterFeatures.push({
+            type: 'trace',
+            x1: originX + f.x1, y1: originY + f.y1,
+            x2: originX + f.x2, y2: originY + f.y2,
+            aperture: rectApertures.get(key),
+          });
+        }
       }
-    }
-  } else {
-      // B.Cu: render either custom copperBack (circuit modules) or auto SMD pad matrix (simple adapters)
+    } else {
+      // B.Cu: render either custom copperBack (circuit modules) or auto SMD pad matrix (simple adapters)      
       const isComplexAdapter = adapter.features.copperBack || adapter.features.drills;
       
       if (isComplexAdapter) {
-        // Complex adapter: render pre-routed B.Cu features from copperBack
-        if (adapter.features.copperBack) {
-          for (const f of adapter.features.copperBack) {
-            if (f.type === 'pad') {
-              const key = padKey(f.w, f.h, f.rotation);
-              if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
-              adapterFeatures.push({
-                type: 'pad', x: originX + f.x, y: originY + f.y,
-                aperture: rectApertures.get(key),
-              });
-            } else if (f.type === 'trace') {
-              const key = `T${f.w.toFixed(4)}`;
-              if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
-              adapterFeatures.push({
-                type: 'trace',
-                x1: originX + f.x1, y1: originY + f.y1,
-                x2: originX + f.x2, y2: originY + f.y2,
-                aperture: rectApertures.get(key),
-              });
+          // Complex adapter: render pre-routed B.Cu features from copperBack
+          if (adapter.features.copperBack) {
+            for (const f of adapter.features.copperBack) {
+              if (f.type === 'pad') {
+                const key = padKey(f.w, f.h, f.rotation);
+                if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+                adapterFeatures.push({
+                  type: 'pad', x: originX + f.x, y: originY + f.y,
+                  aperture: rectApertures.get(key),
+                });
+              } else if (f.type === 'trace') {
+                const key = `T${f.w.toFixed(4)}`;
+                if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+                adapterFeatures.push({
+                  type: 'trace',
+                  x1: originX + f.x1, y1: originY + f.y1,
+                  x2: originX + f.x2, y2: originY + f.y2,
+                  aperture: rectApertures.get(key),
+                });
+              }
             }
-          }
-        }
-      } else {
-      // Simple adapter: auto-generate SMD pad matrix for hand-soldering
-      const smdPadSize = SMD_PAD_SIZE;
-      const smdGridPitch = SMD_PAD_GRID;
-      const key = `S${smdPadSize.toFixed(4)}`;
-      if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
-      const aperture = rectApertures.get(key);
-      
-      // Fill the entire adapter rectangle with SMD pads,
-      // filtering out any position too close to a TH drill hole.
-      const startX = originX;
-      const endX   = originX + (adapter.widthPins - 1) * pitch;
-      const startY = originY;
-      const endY   = originY + (adapter.heightPins - 1) * pitch;
+          }      
+        } else {
+        // Simple adapter: auto-generate SMD pad matrix for hand-soldering
+        const smdPadSize = SMD_PAD_SIZE;
+        const smdGridPitch = SMD_PAD_GRID;
+        const key = `S${smdPadSize.toFixed(4)}`;
+        if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+        const aperture = rectApertures.get(key);
+        
+        // Fill the entire adapter rectangle with SMD pads,
+        // filtering out any position too close to a TH drill hole.
+        const startX = originX;
+        const endX   = originX + (adapter.widthPins - 1) * pitch;
+        const startY = originY;
+        const endY   = originY + (adapter.heightPins - 1) * pitch;
 
-      const thKeepout = 1.4; // mm clearance around each TH hole
+        const thKeepout = 1.4; // mm clearance around each TH hole
 
-      for (let sx = startX; sx <= endX; sx += smdGridPitch) {
-        for (let sy = startY; sy <= endY; sy += smdGridPitch) {
-          const rx = round4(sx);
-          const ry = round4(sy);
-          let tooClose = false;
-          for (const pin of adapter.throughPins) {
-            const tx = originX + pin.col * pitch;
-            const ty = originY + pin.row * pitch;
-            if (Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout) {
-              tooClose = true;
-              break;
+        for (let sx = startX; sx <= endX; sx += smdGridPitch) {
+          for (let sy = startY; sy <= endY; sy += smdGridPitch) {
+            const rx = round4(sx);
+            const ry = round4(sy);
+            let tooClose = false;
+            for (const pin of adapter.throughPins) {
+              const tx = originX + pin.col * pitch;
+              const ty = originY + pin.row * pitch;
+              if (Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout) {
+                tooClose = true;
+                break;
+              }
             }
-          }
-          if (!tooClose) {
-            adapterFeatures.push({ type: 'pad', x: rx, y: ry, aperture });
+            if (!tooClose) {
+              adapterFeatures.push({ type: 'pad', x: rx, y: ry, aperture });
+            }
           }
         }
       }
-    }
-  }
+    }          
 
     // Through-hole pads at adapter pin positions (both layers, deduplicated)
     for (const pin of adapter.throughPins) {
@@ -897,91 +898,91 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
     const originY = gridBottom + inst.row * pitch;
 
     if (isTopMask) {
-    // F.Mask: SMD pad mask openings from adapter features
-    for (const f of adapter.features.mask) {
-      if (f.type === 'pad') {
-        const key = padKey(f.w, f.h, f.rotation);
+      // F.Mask: SMD pad mask openings from adapter features
+      for (const f of adapter.features.mask) {
+        if (f.type === 'pad') {
+          const key = padKey(f.w, f.h, f.rotation);
+          if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+          adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key) });
+        }
+      }
+    } else {
+        // B.Mask: mask openings matching B.Cu pads
+        const isComplexAdapter = adapter.features.copperBack || adapter.features.drills;
+        
+        if (isComplexAdapter) {
+          // Complex adapter: mask openings for copperBack pads + via annular rings
+          if (adapter.features.copperBack) {
+            for (const f of adapter.features.copperBack) {
+              if (f.type === 'pad') {
+                const mw = f.w + maskExpansion * 2;
+                const mh = f.h + maskExpansion * 2;
+
+                const key = padKey(mw, mh, f.rotation);
+                if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+                  adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key) });
+              }
+            }
+          }
+          // Via mask openings
+          if (adapter.features.drills) {
+            for (const v of adapter.features.drills) {
+              const viaMaskSize = v.size + maskExpansion * 2;
+              const key = `V${viaMaskSize.toFixed(4)}`;
+              if (!rectApertures.has(key)) {
+                rectApertures.set(key, nextAperture++);
+              }
+              adapterMask.push({ x: originX + v.x, y: originY + v.y, aperture: rectApertures.get(key), isCircle: true, d: viaMaskSize });
+            }
+          }
+        } else {
+        // Simple adapter: auto-generate mask openings for SMD pad matrix
+        const smdPadSize = SMD_PAD_SIZE;
+        const smdMaskSize = smdPadSize + maskExpansion * 2;
+        const smdGridPitch = SMD_PAD_GRID;
+        const key = `S${smdMaskSize.toFixed(4)}`;
         if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
-        adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key) });
-      }
-    }
-  } else {
-      // B.Mask: mask openings matching B.Cu pads
-      const isComplexAdapter = adapter.features.copperBack || adapter.features.drills;
-      
-      if (isComplexAdapter) {
-        // Complex adapter: mask openings for copperBack pads + via annular rings
-        if (adapter.features.copperBack) {
-          for (const f of adapter.features.copperBack) {
-            if (f.type === 'pad') {
-              const mw = f.w + maskExpansion * 2;
-              const mh = f.h + maskExpansion * 2;
+        const aperture = rectApertures.get(key);
 
-              const key = padKey(mw, mh, f.rotation);
-              if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
-                adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key) });
+        const startX = originX;
+        const endX   = originX + (adapter.widthPins - 1) * pitch;
+        const startY = originY;
+        const endY   = originY + (adapter.heightPins - 1) * pitch;
+
+        const thKeepout = 1.4;
+
+        for (let sx = startX; sx <= endX; sx += smdGridPitch) {        
+          for (let sy = startY; sy <= endY; sy += smdGridPitch) {
+            const rx = round4(sx);
+            const ry = round4(sy);
+            let tooClose = false;
+            for (const pin of adapter.throughPins) {
+              const tx = originX + pin.col * pitch;
+              const ty = originY + pin.row * pitch;
+              if (Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout) {
+                tooClose = true;
+                break;
+              }
             }
-          }
-        }
-        // Via mask openings
-        if (adapter.features.drills) {
-          for (const v of adapter.features.drills) {
-            const viaMaskSize = v.size + maskExpansion * 2;
-            const key = `V${viaMaskSize.toFixed(4)}`;
-            if (!rectApertures.has(key)) {
-              rectApertures.set(key, nextAperture++);
+            if (!tooClose) {
+              adapterMask.push({ x: rx, y: ry, aperture });
             }
-            adapterMask.push({ x: originX + v.x, y: originY + v.y, aperture: rectApertures.get(key), isCircle: true, d: viaMaskSize });
-          }
-        }
-      } else {
-      // Simple adapter: auto-generate mask openings for SMD pad matrix
-      const smdPadSize = SMD_PAD_SIZE;
-      const smdMaskSize = smdPadSize + maskExpansion * 2;
-      const smdGridPitch = SMD_PAD_GRID;
-      const key = `S${smdMaskSize.toFixed(4)}`;
-      if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
-      const aperture = rectApertures.get(key);
-
-      const startX = originX;
-      const endX   = originX + (adapter.widthPins - 1) * pitch;
-      const startY = originY;
-      const endY   = originY + (adapter.heightPins - 1) * pitch;
-
-      const thKeepout = 1.4;
-
-      for (let sx = startX; sx <= endX; sx += smdGridPitch) {        
-        for (let sy = startY; sy <= endY; sy += smdGridPitch) {
-          const rx = round4(sx);
-          const ry = round4(sy);
-          let tooClose = false;
-          for (const pin of adapter.throughPins) {
-            const tx = originX + pin.col * pitch;
-            const ty = originY + pin.row * pitch;
-            if (Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout) {
-              tooClose = true;
-              break;
-            }
-          }
-          if (!tooClose) {
-            adapterMask.push({ x: rx, y: ry, aperture });
           }
         }
       }
     }
-  }
 
-    // TH mask openings (both layers, deduplicated)
-for (const pin of adapter.throughPins) {
-      const x = round4(gridLeft + (inst.col + pin.col) * pitch);
-      const y = round4(gridBottom + (inst.row + pin.row) * pitch);
-      const key = `${fmtCoord(x)},${fmtCoord(y)}`;
-      if (!maskThSeen.has(key)) {
-        maskThSeen.add(key);
-        adapterMask.push({ x, y, aperture: 10 });
+  // TH mask openings (both layers, deduplicated)
+  for (const pin of adapter.throughPins) {
+        const x = round4(gridLeft + (inst.col + pin.col) * pitch);
+        const y = round4(gridBottom + (inst.row + pin.row) * pitch);
+        const key = `${fmtCoord(x)},${fmtCoord(y)}`;
+        if (!maskThSeen.has(key)) {
+          maskThSeen.add(key);
+          adapterMask.push({ x, y, aperture: 10 });
+        }
       }
     }
-  }
 
   for (const [key, num] of rectApertures) {
         if (key.startsWith('V')) {

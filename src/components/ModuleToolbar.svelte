@@ -99,6 +99,8 @@ function addModule() {
     const isVariableSubGrid = def.id === VARIABLE_SUBGRID_ADAPTER_ID;
     const widthPins = isVariableSubGrid ? 4 : def.widthPins;
     const heightPins = isVariableSubGrid ? 4 : def.heightPins;
+    const subGridPitch = isVariableSubGrid ? (def.subGridPitches?.[0] || 2.0) : undefined;
+    const subPadSize = isVariableSubGrid ? Math.max(0.4, Math.min(subGridPitch - 0.2, subGridPitch * 0.6)) : undefined;
 
     adapters = [...adapters, {
       id: crypto.randomUUID(),
@@ -108,7 +110,7 @@ function addModule() {
       row: Math.max(0, Math.floor((rows - heightPins) / 2)),
       rotation: 0,
       color: def.color,
-      ...(isVariableSubGrid ? { widthPins, heightPins } : {}),
+      ...(isVariableSubGrid ? { widthPins, heightPins, subGridPitch, subPadSize } : {}),
     }];
   }
 

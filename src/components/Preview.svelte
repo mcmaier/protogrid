@@ -311,8 +311,8 @@
     let widthPins = resizing.startWidthPins + (resizing.corner.includes('right') ? dCols : -dCols);
     let heightPins = resizing.startHeightPins + (resizing.corner.includes('top') ? dRows : -dRows);
 
-    widthPins = Math.max(1, widthPins);
-    heightPins = Math.max(1, heightPins);
+    widthPins = Math.max(2, widthPins);
+    heightPins = Math.max(2, heightPins);
 
     let { col, row } = getAdapterMinColAndRow(
       resizing.anchorCol,
@@ -922,6 +922,14 @@
           {#if b.type === 'trace'}
             <line x1={a.x + b.x1} y1={a.y + b.y1} x2={a.x + b.x2} y2={a.y + b.y2}
               stroke="#0b280b" stroke-width={b.w} stroke-opacity="0.4" stroke-linecap="round" />
+          {/if}
+        {/each}
+
+        {#each a.def.features.copperBack as b_p}
+          {#if b_p.type === 'pad'}
+            <rect x={a.x + b_p.x - b_p.w / 2} y={a.y + b_p.y - b_p.h / 2}
+              width={b_p.w} height={b_p.h} fill="#3f7a40" fill-opacity="0.85" rx="0.12" ry="0.12"
+              transform={b_p.rotation ? `rotate(${b_p.rotation}, ${a.x + b_p.x}, ${a.y + b_p.y})` : undefined}/>
           {/if}
         {/each}
 
