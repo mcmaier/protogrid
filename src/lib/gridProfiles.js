@@ -5,7 +5,7 @@ export const PAD_SHAPES = {
 
 export const GRID_PITCH_PROFILES = {
   2.54: { pitch: 2.54, padSize: 1.6, drillSize: 1.0, padShape: PAD_SHAPES.CIRCLE },
-  2.0: { pitch: 2.0, padSize: 1.2, drillSize: 0.8, padShape: PAD_SHAPES.CIRCLE },
+  2.00: { pitch: 2.00, padSize: 1.2, drillSize: 0.8, padShape: PAD_SHAPES.CIRCLE },
   1.27: { pitch: 1.27, padSize: 0.9, drillSize: 0.6, padShape: PAD_SHAPES.CIRCLE },
 };
 

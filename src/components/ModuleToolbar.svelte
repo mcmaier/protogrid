@@ -130,7 +130,6 @@ function addModule() {
     if (selectedInstanceId === instanceId) onSelect(null);
   }
 
-  // ToDo - make it work
   function changeAdapterGrid(instanceId) {
     adapters = adapters.map(a =>
       a.id === instanceId

@@ -185,7 +185,7 @@
       Pitch
       <select bind:value={config.pitch}>
         <option value={2.54}>2.54 mm (Standard)</option>
-        <option value={2.0}>2.0 mm</option>
+        <option value={2.00}>2.00 mm</option>
         <option value={1.27}>1.27 mm</option>
       </select>
     </label>
