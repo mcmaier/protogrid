@@ -132,11 +132,11 @@ function round4(val) {
  * Returns array of { x, y, diameter, keepout }
  */
 export function computeMountingHoles(config) {
-  const { width, height, mountingHoles, padDiameter = 1.0, annularRing = 0.3 } = config;
+  const { width, height, mountingHoles, drillDiameter = 1.0, annularRing = 0.3 } = config;
   if (!mountingHoles || mountingHoles.mode === 'none') return [];
 
   const { diameter, edgeDistance } = mountingHoles;
-  const copperPadRadius = (padDiameter + annularRing * 2) / 2;
+  const copperPadRadius = (drillDiameter + annularRing * 2) / 2;
   // Keepout = mounting hole radius + clearance + full copper pad diameter
   // so that no pad copper overlaps the hole area
   const keepout = diameter + MOUNT_KEEPOUT_MARGIN * 2 + copperPadRadius * 2;
@@ -183,11 +183,11 @@ export function isInKeepout(x, y, holes) {
  * Grid extends as far as possible while staying >= 1 pitch from edges.
  */
 export function computeGrid(config) {
-  const { width, height, pitch, labels = {}, padDiameter = 1.0, annularRing = 0.3 } = config;
+  const { width, height, pitch, labels = {}, drillDiameter = 1.0, annularRing = 0.3 } = config;
 
   // Label dimension constants (must match generateLabelStrokes)
   const h = LABEL_HEIGHT;
-  const copperRadius = (padDiameter + annularRing * 2) / 2;
+  const copperRadius = (drillDiameter + annularRing * 2) / 2;
   const labelGap = copperRadius + h * 0.8; // distance from pad center to text anchor
 
   // Text width: scale = h/5, charWidth = 2*scale, charGap = 1*scale
@@ -648,7 +648,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
   const traces = generatePowerRailTraces(config, placedAdapters);
   const signalTraces = generateSignalTraces(config, placedAdapters);
   const holes = computeMountingHoles(config);
-  const { padDiameter, annularRing, pitch } = config;
+  const { drillDiameter, annularRing, pitch, padShape = 'circle' } = config;
   const { gridLeft, gridBottom } = computeGrid(config);
 
   let gerber = GERBER_HEADER(layerName);
@@ -656,10 +656,17 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
   // RoundRect macro for SMD pads
   gerber += GERBER_ROUNDRECT_MACRO;
 
-  const copperPadDia = padDiameter + annularRing * 2;
-  gerber += `%ADD10C,${copperPadDia.toFixed(6)}*%\n`; // Signal pad
-  gerber += `%ADD11C,${copperPadDia.toFixed(6)}*%\n`; // VCC pad
-  gerber += `%ADD12C,${copperPadDia.toFixed(6)}*%\n`; // GND pad
+  const copperPadDia = drillDiameter + annularRing * 2;
+  const basePadAperture = padShape === 'square'
+    ? `%ADD10R,${copperPadDia.toFixed(6)}X${copperPadDia.toFixed(6)}*%\n`
+    : `%ADD10C,${copperPadDia.toFixed(6)}*%\n`;
+  gerber += basePadAperture; // Signal pad
+  gerber += padShape === 'square'
+    ? `%ADD11R,${copperPadDia.toFixed(6)}X${copperPadDia.toFixed(6)}*%\n`
+    : `%ADD11C,${copperPadDia.toFixed(6)}*%\n`; // VCC pad
+  gerber += padShape === 'square'
+    ? `%ADD12R,${copperPadDia.toFixed(6)}X${copperPadDia.toFixed(6)}*%\n`
+    : `%ADD12C,${copperPadDia.toFixed(6)}*%\n`; // GND pad
   gerber += `%ADD20C,${GERBER_RAIL_TRACE_WIDTH.toFixed(6)}*%\n`; // Rail trace
 
   // Mounting hole keepout aperture (clear copper around holes)
@@ -861,7 +868,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
 export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters = []) {
   const pads = generatePadPositions(config, placedAdapters);
   const holes = computeMountingHoles(config);
-  const { padDiameter, annularRing, maskExpansion, pitch } = config;
+  const { drillDiameter, annularRing, maskExpansion, pitch } = config;
   const { gridLeft, gridBottom } = computeGrid(config);
 
   let gerber = GERBER_HEADER(layerName);
@@ -869,7 +876,7 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
   // RoundRect macro for mask openings matching SMD pads
   gerber += GERBER_ROUNDRECT_MACRO;
 
-  const maskDia = padDiameter + annularRing * 2 + maskExpansion * 2;
+  const maskDia = drillDiameter + annularRing * 2 + maskExpansion * 2;
   gerber += `%ADD10C,${maskDia.toFixed(6)}*%\n`;
 
   // Mounting hole mask opening (expose copper-free area)
@@ -1147,12 +1154,12 @@ export function generateSilkscreen(config, placedAdapters = []) {
  * Returns array of polylines for both Gerber and SVG preview.
  */
 export function generateLabelStrokes(config) {
-  const { labels = {}, powerRails, pitch, padDiameter = 1.0, annularRing = 0.3 } = config;
+  const { labels = {}, powerRails, pitch, drillDiameter = 1.0, annularRing = 0.3 } = config;
   const { gridLeft, gridTop, gridRight, gridBottom, cols, rows } = computeGrid(config);
   const holes = computeMountingHoles(config);
   const allStrokes = [];
   const h = LABEL_HEIGHT;
-  const copperRadius = (padDiameter + annularRing * 2) / 2;
+  const copperRadius = (drillDiameter + annularRing * 2) / 2;
   // Gap = enough to clear the copper pad edge + small margin
   const gap = copperRadius + h * 0.8;
 
@@ -1326,7 +1333,7 @@ export function generateLabelStrokes(config) {
 export function generateDrillFile(config, placedAdapters = []) {
   const pads = generatePadPositions(config, placedAdapters);
   const holes = computeMountingHoles(config);
-  const { padDiameter, pitch } = config;
+  const { drillDiameter, pitch } = config;
   const { gridLeft, gridBottom } = computeGrid(config);
 
     // Pre-collect adapter via drills (grouped by drill size)
@@ -1351,7 +1358,7 @@ export function generateDrillFile(config, placedAdapters = []) {
   drill += `; Drill file - Excellon format\n`;
   drill += `M48\n`;
   drill += `METRIC,TZ\n`;
-  drill += `T1C${padDiameter.toFixed(3)}\n`;
+  drill += `T1C${drillDiameter.toFixed(3)}\n`;
 
   let nextTool = 2;
   const mountTool = holes.length > 0 ? nextTool++ : null;

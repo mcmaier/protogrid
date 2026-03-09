@@ -1,5 +1,5 @@
 <script>
-  import { computeSignalGrid, computeMinSize, BOARD_MIN_WIDTH, BOARD_MAX_WIDTH, BOARD_MIN_HEIGHT, BOARD_MAX_HEIGHT, MOUNT_EDGE_MIN, MOUNT_EDGE_MAX } from '../lib/gerber.js';  
+  import { computeSignalGrid, computeMinSize, BOARD_MIN_WIDTH, BOARD_MAX_WIDTH, BOARD_MIN_HEIGHT, BOARD_MAX_HEIGHT, MOUNT_EDGE_MIN, MOUNT_EDGE_MAX } from '../lib/gerber.js';
 
   let { config = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [], signalTrackDrawMode = $bindable(), onToggleSignalTrackDrawMode = $bindable(), onDeleteCustomTracks, onDeleteAllCustomTracks, selectedSignalTrackIndex = null } = $props();
 
@@ -8,6 +8,7 @@
   let effMinH = $derived(Math.max(BOARD_MIN_HEIGHT, minSize.minHeight));
 
   let sigGrid = $derived(computeSignalGrid(config, resolvedAdapters));
+  let padSize = $derived((config.drillDiameter + config.annularRing * 2).toFixed(2));
 
   // Text input buffers – decoupled from config so typing isn't interrupted
   let widthText = $state(String(config.width));
@@ -185,8 +186,27 @@
       <select bind:value={config.pitch}>
         <option value={2.54}>2.54 mm (Standard)</option>
         <option value={2.0}>2.0 mm</option>
+        <option value={1.27}>1.27 mm</option>
       </select>
     </label>
+  </div>
+
+
+
+  <div class="control-group">
+    <h3>Grid Pad Profile</h3>
+    <div class="profile-row">
+      <span>Pad Size</span>
+      <span>{padSize} mm</span>
+    </div>
+    <div class="profile-row">
+      <span>Drill Size</span>
+      <span>{config.drillDiameter.toFixed(2)} mm</span>
+    </div>
+    <div class="profile-row">
+      <span>Pad Shape</span>
+      <span>{config.padShape === 'square' ? 'Square' : 'Round'}</span>
+    </div>
   </div>
 
   <div class="control-group">
@@ -321,6 +341,7 @@
   }
 
   .control-group { display: flex; flex-direction: column; gap: 10px; }
+  .profile-row { display:flex; justify-content: space-between; align-items: center; color:#cdd6f4; }
 
   label {
     display: flex; justify-content: space-between;

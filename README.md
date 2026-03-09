@@ -52,7 +52,7 @@ into `/dist`.
 
 ## GridGen Features
 - [x] Rectangular board, free dimensions
-- [x] Grid pitch: 2.54mm, 2.0mm
+- [x] Grid pitch: 2.54mm, 2.0mm, 1.27mm
 - [x] Power rails (VCC/GND) on any edge
 - [x] Row and column numbering
 - [x] Live SVG preview 

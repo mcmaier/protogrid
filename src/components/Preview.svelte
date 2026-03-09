@@ -128,7 +128,7 @@
     silkscreen: '#e8e8e8',
   };
 
-  let copperDia = $derived(fullConfig.padDiameter + fullConfig.annularRing * 2);
+  let copperDia = $derived(fullConfig.drillDiameter + fullConfig.annularRing * 2);
 
   // Convert polyline to SVG path "d" string
   function polyToPath(polyline) {
@@ -807,7 +807,7 @@
     <circle
       cx={pad.x}
       cy={pad.y}
-      r={fullConfig.padDiameter / 2}
+      r={fullConfig.drillDiameter / 2}
       fill={colors.padHole}
     />
   {/each}
@@ -963,7 +963,7 @@
           <circle cx={a.x + pin.col * a.pitch} cy={a.y + pin.row * a.pitch}
             r={copperDia / 2} fill="#c8a84e" />
           <circle cx={a.x + pin.col * a.pitch} cy={a.y + pin.row * a.pitch}
-            r={config.padDiameter / 2} fill="#1a1a1a" />
+            r={config.drillDiameter / 2} fill="#1a1a1a" />
         {/each}
 
         {#each a.def.features.silk as f}

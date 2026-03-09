@@ -6,13 +6,15 @@
   import { downloadAsZip } from './lib/zip.js';
   import { getAdapterForInstance } from './lib/adapters.js';
   import { parseProject, serializeProject } from './lib/projectFile.js';
+  import { applyPitchProfile } from './lib/gridProfiles.js';
 
-  const defaultConfig = {
+  const defaultConfig = applyPitchProfile({
     width: 50,
     height: 40,
     pitch: 2.54,
-    padDiameter: 1.0,
+    drillDiameter: 1.0,
     annularRing: 0.3,
+    padShape: 'circle',
     powerRails: {
       top: true,
       bottom: false,
@@ -29,7 +31,7 @@
       cols: 0,
     },
     signalTracks: [],
-  };
+  }, 2.54);
 
   let config = $state(structuredClone(defaultConfig));
   let modules = $state([]);
@@ -187,10 +189,10 @@
   $effect(() => {
     if (config.pitch === lastPitch) return;
 
-    config = {
+    config = applyPitchProfile({
       ...config,
       signalTracks: [],
-    };
+    }, config.pitch);
     signalTrackDrawMode = false;
     selectedSignalTrackIndex = null;
     lastPitch = config.pitch;

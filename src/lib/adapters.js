@@ -29,6 +29,8 @@
  */
 
 /** Base path for module overlay PNGs. Override for WordPress deployment. */
+import { getPitchProfile } from './gridProfiles.js';
+
 export let adapterOverlayBasePath = './assets/adapters';
 export const VARIABLE_SUBGRID_ADAPTER_ID = 'subgrid-variable';
 
@@ -1741,14 +1743,16 @@ export function getAdapterForInstance(inst) {
   const widthPins = Math.max(1, Math.round(inst.widthPins || adapter.widthPins || 4));
   const heightPins = Math.max(1, Math.round(inst.heightPins || adapter.heightPins || 4));
   const fallbackPitch = adapter.subGridPitches?.[0] || 2.00;
-  const fallbackPad = Math.max(0.4, Math.min(fallbackPitch - 0.2, fallbackPitch * 0.6));
-  const fallbackDrill = 0.3;
+  const fallbackProfile = getPitchProfile(fallbackPitch);
+  const fallbackPad = fallbackProfile.padSize;
+  const fallbackDrill = fallbackProfile.drillSize;
   const maskExpansion = 0.05;
 
   const subGridPitch = Number(inst.subGridPitch) > 0 ? Number(inst.subGridPitch) : fallbackPitch;
-  const requestedPadSize = Number(inst.subPadSize) > 0 ? Number(inst.subPadSize) : fallbackPad;
+  const subProfile = getPitchProfile(subGridPitch);
+  const requestedPadSize = Number(inst.subPadSize) > 0 ? Number(inst.subPadSize) : subProfile.padSize;
   const subPadSize = Math.max(0.25, Math.min(requestedPadSize, Math.max(0.25, subGridPitch - 0.15)));
-  const subDrillSize = Number(inst.subGridDrill) > 0.3 ? Number(inst.subGridDrill) : fallbackDrill;
+  const subDrillSize = Number(inst.subGridDrill) > 0.1 ? Number(inst.subGridDrill) : subProfile.drillSize;
   const subgridPads = buildSubgridPads({
     widthPins,
     heightPins,
@@ -1811,9 +1815,13 @@ export function cycleVariableSubgridPitch(inst) {
     ? (currentIndex + 1) % pitches.length
     : 0;
 
+  const nextPitch = pitches[nextIndex];
+  const profile = getPitchProfile(nextPitch);
   return {
     ...inst,
-    subGridPitch: pitches[nextIndex],
+    subGridPitch: nextPitch,
+    subPadSize: profile.padSize,
+    subGridDrill: profile.drillSize,
   };
 }
 

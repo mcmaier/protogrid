@@ -26,8 +26,9 @@ function sanitizeConfig(rawConfig, defaults) {
     width: toNumber(config.width, defaults.width),
     height: toNumber(config.height, defaults.height),
     pitch: toNumber(config.pitch, defaults.pitch),
-    padDiameter: toNumber(config.padDiameter, defaults.padDiameter),
+    drillDiameter: toNumber(config.drillDiameter ?? config.padDiameter, defaults.drillDiameter),
     annularRing: toNumber(config.annularRing, defaults.annularRing),
+    padShape: typeof config.padShape === 'string' ? config.padShape : defaults.padShape,
     powerRails: {
       top: toBoolean(powerRails.top, defaults.powerRails.top),
       bottom: toBoolean(powerRails.bottom, defaults.powerRails.bottom),

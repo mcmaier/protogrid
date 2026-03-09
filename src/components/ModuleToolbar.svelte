@@ -1,6 +1,7 @@
 <script>
   import { MODULE_LIBRARY } from '../lib/modules.js';
   import { ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch } from '../lib/adapters.js';
+  import { getPitchProfile } from '../lib/gridProfiles.js';
 
   let { modules = $bindable(), adapters = $bindable(), config, selectedInstanceId, onSelect, showModuleOverlays = $bindable(), showAdapterOverlays = $bindable() } = $props();
   let selectedModuleId = $state('');
@@ -100,7 +101,9 @@ function addModule() {
     const widthPins = isVariableSubGrid ? 4 : def.widthPins;
     const heightPins = isVariableSubGrid ? 4 : def.heightPins;
     const subGridPitch = isVariableSubGrid ? (def.subGridPitches?.[0] || 2.0) : undefined;
-    const subPadSize = isVariableSubGrid ? Math.max(0.4, Math.min(subGridPitch - 0.2, subGridPitch * 0.6)) : undefined;
+    const subProfile = isVariableSubGrid ? getPitchProfile(subGridPitch) : null;
+    const subPadSize = subProfile?.padSize;
+    const subGridDrill = subProfile?.drillSize;
 
     adapters = [...adapters, {
       id: crypto.randomUUID(),
@@ -110,7 +113,7 @@ function addModule() {
       row: Math.max(0, Math.floor((rows - heightPins) / 2)),
       rotation: 0,
       color: def.color,
-      ...(isVariableSubGrid ? { widthPins, heightPins, subGridPitch, subPadSize } : {}),
+      ...(isVariableSubGrid ? { widthPins, heightPins, subGridPitch, subPadSize, subGridDrill } : {}),
     }];
   }
 
@@ -131,7 +134,7 @@ function addModule() {
   function changeAdapterGrid(instanceId) {
     adapters = adapters.map(a =>
       a.id === instanceId
-        ? { cycleVariableSubgridPitch}
+        ? cycleVariableSubgridPitch(a)
         : a
     );
   }
