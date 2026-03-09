@@ -29,7 +29,7 @@ const COLORS = {
 const DEFAULT_ADAPTER = {
   id: "soic8", name: "SOIC-8", category: "SOIC",
   widthPins: 4, heightPins: 4,
-  originOffset: { x: 0, y: 0 },
+  originOffset: { x: 0, y: 0, rot: 0 },
   smdPads: [], traces: [], throughPins: [], silkBody: null, silkLines: [], silkText: [],
 };
 
@@ -406,7 +406,7 @@ function kicadPcbToAdapter(parsed) {
 
 function roundTo(val, dec = 4) { return Math.round(val * 10 ** dec) / 10 ** dec; }
 
-const ZOOM_LEVELS = [6, 8, 10, 14, 18, 24, 32, 40, 50];
+const ZOOM_LEVELS = [6, 8, 10, 14, 18, 24, 32, 40, 50, 60, 70, 80];
 
 function AdapterEditor() {
   const [adapter, setAdapter] = useState(DEFAULT_ADAPTER);
@@ -623,15 +623,19 @@ function AdapterEditor() {
         ),
 
         // Origin offset
-        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
-          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "ORIGIN OFFSET (mm)"),
-          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4} },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "ORIGIN OFFSET (mm) / ROTATION (°)"),
+          React.createElement("div", { style: { marginTop: 4,  fontSize: 10, color: COLORS.textDim } }, "Shifts KiCad center → adapter origin"),
+          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", marginTop: 4 } },
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "X"),
             React.createElement("input", { type: "number", step: 0.01, value: adapter.originOffset.x, onChange: e => setAdapter(a => ({ ...a, originOffset: { ...a.originOffset, x: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: 64 } }),
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Y"),
             React.createElement("input", { type: "number", step: 0.01, value: adapter.originOffset.y, onChange: e => setAdapter(a => ({ ...a, originOffset: { ...a.originOffset, y: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: 64 } }),
           ),
-          React.createElement("div", { style: { marginTop: 4, fontSize: 10, color: COLORS.textDim } }, "Shifts KiCad center → adapter origin"),
+          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", marginTop: 8 } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "R"),
+            React.createElement("input", { type: "number", step: 1, value: adapter.originOffset.rot, onChange: e => setAdapter(a => ({ ...a, originOffset: { ...a.originOffset, rot: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: 64 } }),            
+          ),
         ),
 
         // TH Pins
@@ -670,13 +674,13 @@ function AdapterEditor() {
         ),
 
         // Import
-        React.createElement("button", { onClick: () => setShowImport(!showImport), style: { ...btnStyle, padding: "6px 8px", fontSize: 11, border: `1px solid ${COLORS.panelBorder}` } }, "📁 Import KiCad / Gerber"),
+        React.createElement("button", { onClick: () => setShowImport(!showImport), style: { ...btnStyle, padding: "6px 8px", fontSize: 11, border: `1px solid ${COLORS.panelBorder}` } }, "📁 Import KiCad Footprint / PCB"),
         showImport && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
           React.createElement("input", { type: "file", accept: ".kicad_mod,.kicad_pcb,.gbr,.gtl,.gbl", onChange: handleFileImport, style: { fontSize: 10, color: COLORS.textDim } }),
           React.createElement("textarea", { value: importText, onChange: e => setImportText(e.target.value), placeholder: "...or paste file content", rows: 4, style: { ...inputStyle, fontSize: 10, resize: "vertical" } }),
           React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
             React.createElement("button", { onClick: doImport, style: { ...btnStyle, background: COLORS.accent, color: "#fff" } }, "KiCad Mod"),
-            React.createElement("button", { onClick: () => {
+            /*React.createElement("button", { onClick: () => {
               const parsed = parseGerber(importText);
               if (parsed.pads.length === 0 && parsed.traces.length === 0) { alert("No features in Gerber"); return; }
               let minX = Infinity, minY = Infinity;
@@ -686,7 +690,7 @@ function AdapterEditor() {
               const traces = parsed.traces.map(t => ({ segments: [{ x1: roundTo(t.x1-minX,4), y1: roundTo(t.y1-minY,4), x2: roundTo(t.x2-minX,4), y2: roundTo(t.y2-minY,4), w: t.w }] }));
               setAdapter(a => ({ ...a, smdPads: pads, traces: [...a.traces, ...traces], silkLines: [], silkText: [] }));
               setShowImport(false);
-            }, style: { ...btnStyle, background: "#40a060", color: "#fff" } }, "Gerber"),
+            }, style: { ...btnStyle, background: "#40a060", color: "#fff" } }, "Gerber"),*/
             React.createElement("button", { onClick: () => {
               const parsed = parseKicadPcb(importText);
               if (parsed.error) { alert(parsed.error); return; }
