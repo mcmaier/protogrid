@@ -22,8 +22,7 @@
 
   let trackDrawMode = $derived(signalTrackDrawMode);
   let trackDrawModeToggle = $derived(onToggleSignalTrackDrawMode);
-  let customTrackCount = $derived((config.signalTracks || []).length);
-  let hasSelectedTrack = $derived(selectedSignalTrackIndex !== null);
+  let customTrackCount = $derived((config.signalTracks || []).length);  
 
   $effect(() => {
     if (config.width !== lastWidth) {
@@ -191,27 +190,20 @@
     </label>
   </div>
 
-
-
-  <div class="control-group">
-    <h3>Grid Pad Profile</h3>
-    <div class="profile-row">
-      <span>Pad Size</span>
-      <span>{padSize} mm</span>
-    </div>
-    <div class="profile-row">
-      <span>Drill Size</span>
-      <span>{config.drillDiameter.toFixed(2)} mm</span>
-    </div>
-    <div class="profile-row">
-      <span>Pad Shape</span>
-      <span>{config.padShape === 'square' ? 'Square' : 'Round'}</span>
-    </div>
+  <div class="info">
+    <span>Pad Size:<br>{padSize} mm</span>
+    <span>Drill Size:<br>{config.drillDiameter.toFixed(2)} mm</span>
+    <span>Signal:<br>{sigGrid.cols} × {sigGrid.rows}</span>
+    <span>Pads:<br>{sigGrid.total}</span>
   </div>
+
+  {#if sigGrid.total === 0}
+    <div class="warning">Board has no signal pads!</div>
+  {/if}
 
   <div class="control-group">
     <h3>Power Rails &amp; Signal Tracks</h3>
-    <div class="rail-toggles">
+    <div class="rail-toggles quad">
       <button class="rail-btn" class:active={config.powerRails.top}
         onclick={() => toggleRail('top')}>Top</button>
       <button class="rail-btn" class:active={config.powerRails.bottom}
@@ -287,15 +279,6 @@
     </div>
   </div>
 
-  <div class="info">
-    <span>Signal: {sigGrid.cols} × {sigGrid.rows}</span>
-    <span>Pads: {sigGrid.total}</span>
-  </div>
-
-  {#if sigGrid.total === 0}
-    <div class="warning">Board has no signal pads!</div>
-  {/if}
-
   <div class="project-section">
     <div class="project-actions">
       <button class="secondary-btn" onclick={onSaveProject}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16">
@@ -341,7 +324,6 @@
   }
 
   .control-group { display: flex; flex-direction: column; gap: 10px; }
-  .profile-row { display:flex; justify-content: space-between; align-items: center; color:#cdd6f4; }
 
   label {
     display: flex; justify-content: space-between;
@@ -390,6 +372,7 @@
 
   .rail-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .rail-toggles.triple { grid-template-columns: 1fr 1fr 1fr; }
+  .rail-toggles.quad { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; }
 
   .rail-btn {
     padding: 8px; background: #313244; border: 1px solid #45475a;
@@ -430,7 +413,7 @@
   .info {
     display: flex; justify-content: space-between;
     padding: 10px 12px; background: #313244;
-    border-radius: 6px; font-size: 13px; color: #a6adc8;
+    border-radius: 6px; font-size: 12px; color: #9ba3c5;
   }
 
   .warning {

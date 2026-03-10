@@ -55,7 +55,7 @@ export const ADAPTER_LIBRARY = [
       widthPins: 4,
       heightPins: 4,
       isResizable: true,
-      subGridPitches: [2.00, 1.27],
+      subGridPitches: [2.54, 2.00, 1.27],
     },
 
     {

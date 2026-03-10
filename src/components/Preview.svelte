@@ -1212,12 +1212,14 @@
 <style>
   .preview-container {
     position: relative;
+    max-height: 82dvh;
+    overflow: hidden;
   }
 
   .pcb-preview {
     width: 100%;
     height: auto;
-    max-height: 800px;
+    max-height: inherit;
     border-radius: 8px;
     background: #111;
     padding: 8px;

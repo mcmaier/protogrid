@@ -275,6 +275,7 @@
     grid-template-columns: 280px 1fr;
     gap: 20px;
     align-items: start;
+    max-width: 100vw;
   }
 
   .ppp-sidebar {
