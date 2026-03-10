@@ -23,6 +23,7 @@
   let trackDrawMode = $derived(signalTrackDrawMode);
   let trackDrawModeToggle = $derived(onToggleSignalTrackDrawMode);
   let customTrackCount = $derived((config.signalTracks || []).length);  
+  
 
   $effect(() => {
     if (config.width !== lastWidth) {
@@ -294,7 +295,7 @@
       </label>
     </div>
 
-    <button class="export-btn" onclick={onExport} disabled={sigGrid.total === 0}>
+    <button class="export-btn" onclick={onExport}>
       Download Gerber ZIP
     </button>
 

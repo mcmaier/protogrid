@@ -87,7 +87,7 @@
       const imported = parseProject(text, defaultConfig);
 
       config = imported.config;
-      lastPitch = imported.config.pitch;
+      lastPitch = imported.config.pitch;      
       modules = imported.modules;
       adapters = imported.adapters;
       selectedInstanceId = null;
@@ -187,7 +187,7 @@
   }
   
   $effect(() => {
-    if (config.pitch === lastPitch) return;
+if (config.pitch === lastPitch) return;
 
     const hasPlacedItems = adapters.length > 0 || modules.length > 0;
     if (hasPlacedItems) {
@@ -216,7 +216,6 @@
     selectedSignalTrackIndex = null;
     lastPitch = config.pitch;
   });
-
 </script>
 
 <div class="ppp-app" id="main-app">

@@ -67,6 +67,13 @@ function sanitizePlacedItems(rawItems, key) {
       row: Math.max(0, Math.floor(toNumber(item.row, 0))),
       rotation: Math.max(0, Math.floor(toNumber(item.rotation, 0))) % 4,
       color: typeof item.color === 'string' ? item.color : '#ffffff',
+      widthPins: Math.max(2, Math.floor(toNumber(item.widthPins, 0))),
+      heightPins: Math.max(2, Math.floor(toNumber(item.heightPins, 0))),
+      pitch: toNumber(item.pitch, 2).toFixed(2),
+      subGridPitch: toNumber(item.subGridPitch, 2).toFixed(2),
+      subPadSize: toNumber(item.subPadSize, 1),
+      subPadDrill: toNumber(item.subPadDrill, 1),
+      subPadShape: typeof item.subPadShape === 'string' ? item.subPadShape : "square",
     }));
 }
 

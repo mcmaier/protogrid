@@ -551,7 +551,7 @@ function AdapterEditor() {
       for (let i = 0; i < tracePoints.length - 1; i++) {
         segments.push({ x1: tracePoints[i].x, y1: tracePoints[i].y, x2: tracePoints[i + 1].x, y2: tracePoints[i + 1].y, w: traceWidth });
       }
-      setAdapter(a => ({ ...a, traces: [...a.traces, { segments }] }));
+      setAdapter(a => ({ ...a, traces: [...a.traces, { segments, applyOriginOffset: false }] }));
     }
     setTracePoints([]);
   }, [tracePoints, traceWidth]);
@@ -605,7 +605,7 @@ function AdapterEditor() {
       vias: parsed.vias.map(v => ({ x: roundTo(v.x, 3), y: roundTo(-v.y, 3), size: v.size, drill: v.drill })),
     };
     const rotated = applyFootprintRotationToImport(imported, adapter.originOffset.rot || 0);
-    setAdapter(a => ({ ...a, smdPads: rotated.smdPads, silkBody: rotated.silkBody, silkLines: rotated.silkLines, silkText: rotated.silkText, traces: rotated.topTraces }));
+    setAdapter(a => ({ ...a, smdPads: rotated.smdPads, silkBody: rotated.silkBody, silkLines: rotated.silkLines, silkText: rotated.silkText, traces: rotated.topTraces.map(t => ({ ...t, applyOriginOffset: true })) }));
     setBottomTraces(rotated.bottomTraces);
     setBottomPads(rotated.bottomPads || []);
     setVias(rotated.vias);
@@ -639,6 +639,11 @@ function AdapterEditor() {
     return Math.abs(out) < 0.01 ? 0 : out;
   }, [adapter.originOffset.rot]);
 
+  const transformTracePoint = useCallback((trace, x, y) => {
+    if (trace?.applyOriginOffset === false) return { x, y };
+    return transformPoint(x, y);
+  }, [transformPoint]);
+
   const generateCode = useMemo(() => {
     const { id, name, category, widthPins, heightPins, smdPads, traces, throughPins, originOffset, silkBody, silkLines, silkText } = adapter;
 
@@ -658,8 +663,8 @@ function AdapterEditor() {
     });
     c += `\n        // F.Cu traces\n`;
     traces.forEach(t => { t.segments.forEach(s => {
-      const p1 = transformPoint(s.x1, s.y1);
-      const p2 = transformPoint(s.x2, s.y2);
+      const p1 = transformTracePoint(t, s.x1, s.y1);
+      const p2 = transformTracePoint(t, s.x2, s.y2);
       c += `        { type: 'trace', x1: ${roundTo(p1.x, 4)}, y1: ${roundTo(p1.y, 4)}, x2: ${roundTo(p2.x, 4)}, y2: ${roundTo(p2.y, 4)}, w: ${s.w} },\n`;}); 
     });
     c += `      ],\n`;
@@ -674,8 +679,8 @@ function AdapterEditor() {
         });
 
       bottomTraces.forEach(t => { t.segments.forEach(s => {
-        const p1 = transformPoint(s.x1, s.y1);
-        const p2 = transformPoint(s.x2, s.y2);
+        const p1 = transformTracePoint(t, s.x1, s.y1);
+        const p2 = transformTracePoint(t, s.x2, s.y2);
         c += `        { type: 'trace', x1: ${roundTo(p1.x, 4)}, y1: ${roundTo(p1.y, 4)}, x2: ${roundTo(p2.x, 4)}, y2: ${roundTo(p2.y, 4)}, w: ${s.w} },\n`;});
        });
       c += `      ],\n`;
@@ -731,7 +736,7 @@ function AdapterEditor() {
     c += `    outline: { width: ${roundTo((widthPins - 1) * baseGrid + 2, 1)}, height: ${roundTo((heightPins - 1) * baseGrid + 2, 1)} },\n`;
     c += `    outlineOffset: { x: 0, y: 0 },\n    widthPins: ${widthPins},\n    heightPins: ${heightPins},\n  },`;
     return c;
-  }, [adapter, maskExpansion, bottomPads, bottomTraces, vias, transformPoint, transformRotation, baseGrid, basePitchKey, interfacePinPad, interfacePinDrill]);
+  }, [adapter, maskExpansion, bottomPads, bottomTraces, vias, transformPoint, transformRotation, transformTracePoint, baseGrid, basePitchKey, interfacePinPad, interfacePinDrill]);
 
   const gridDots = [];
   for (let c = 0; c < adapter.widthPins; c++)
@@ -886,7 +891,7 @@ function AdapterEditor() {
                 ...a,
                 widthPins: gridW, heightPins: gridH,
                 smdPads: rotated.smdPads,
-                traces: rotated.topTraces,
+                traces: rotated.topTraces.map(t => ({ ...t, applyOriginOffset: true })),
                 silkLines: rotated.silkLines,
                 silkText: rotated.silkText,
               }));
