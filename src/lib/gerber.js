@@ -714,6 +714,13 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
             x2: originX + f.x2, y2: originY + f.y2,
             aperture: rectApertures.get(key),
           });
+        } else if (f.type === 'circle') {
+          const key = `C${f.d.toFixed(4)}`;
+          if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+          adapterFeatures.push({
+            type: 'pad', x: originX + f.x, y: originY + f.y,
+            aperture: rectApertures.get(key),
+          });
         }
       }
     } else {
@@ -738,6 +745,13 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
                   type: 'trace',
                   x1: originX + f.x1, y1: originY + f.y1,
                   x2: originX + f.x2, y2: originY + f.y2,
+                  aperture: rectApertures.get(key),
+                });
+              } else if (f.type === 'circle') {
+                const key = `C${f.d.toFixed(4)}`;
+                if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+                adapterFeatures.push({
+                  type: 'pad', x: originX + f.x, y: originY + f.y,
                   aperture: rectApertures.get(key),
                 });
               }
@@ -817,6 +831,9 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
       // Square pad (auto-grid) — keep as plain rectangle
       const s = parseFloat(key.slice(1));
       gerber += `%ADD${num}R,${s.toFixed(6)}X${s.toFixed(6)}*%\n`;
+    } else if (key.startsWith('C')) {
+      const d = parseFloat(key.slice(1));
+      gerber += `%ADD${num}C,${d.toFixed(6)}*%\n`;
     } else {
       // SMD pad — use RoundRect (key format: "w,h" or "w,h,rotation")
       const parts = key.split(',').map(Number);
@@ -911,6 +928,10 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
           const key = padKey(f.w, f.h, f.rotation);
           if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
           adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key) });
+        } else if (f.type === 'circle') {
+          const key = `C${f.d.toFixed(4)}`;
+          if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+          adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key), isCircle: true, d: f.d });
         }
       }
     } else {
@@ -928,6 +949,11 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
                 const key = padKey(mw, mh, f.rotation);
                 if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
                   adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key) });
+              } else if (f.type === 'circle') {
+                const md = f.d + maskExpansion * 2;
+                const key = `C${md.toFixed(4)}`;
+                if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
+                adapterMask.push({ x: originX + f.x, y: originY + f.y, aperture: rectApertures.get(key), isCircle: true, d: md });
               }
             }
           }
@@ -1003,6 +1029,9 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
       // Square pad (auto-grid mask) — plain rectangle
       const s = parseFloat(key.slice(1));
       gerber += `%ADD${num}R,${s.toFixed(6)}X${s.toFixed(6)}*%\n`;
+    } else if (key.startsWith('C')) {
+      const d = parseFloat(key.slice(1));
+      gerber += `%ADD${num}C,${d.toFixed(6)}*%\n`;
     } else {
       // SMD pad mask — use RoundRect (key format: "w,h" or "w,h,rotation")
       const parts = key.split(',').map(Number);

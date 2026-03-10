@@ -33,11 +33,38 @@ import { getPitchProfile } from './gridProfiles.js';
 
 export let adapterOverlayBasePath = './assets/adapters';
 export const VARIABLE_SUBGRID_ADAPTER_ID = 'subgrid-variable';
+export const VARIABLE_SUBGRID_PAD_SHAPES = ['square', 'circle'];
+
+function uniqPitches(values) {
+  const out = [];
+  for (const value of values) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) continue;
+    if (!out.some(existing => Math.abs(existing - num) < 0.0001)) out.push(num);
+  }
+  return out;
+}
+
+export function getVariableSubgridPitches(basePitch) {
+  const normalizedBasePitch = Number(basePitch) > 0 ? Number(basePitch) : 2.54;
+  return uniqPitches([
+    normalizedBasePitch,
+    ...(normalizedBasePitch >= 2.54 - 0.0001 ? [2.54] : []),
+    ...(normalizedBasePitch >= 2.00 - 0.0001 ? [2.00] : []),
+    ...(normalizedBasePitch >= 1.27 - 0.0001 ? [1.27] : []),
+  ]);
+}
+
+export function isAdapterCompatibleWithPitch(adapter, pitch) {
+  if (!adapter) return false;
+  if (adapter.id === VARIABLE_SUBGRID_ADAPTER_ID) return true;
+  return adapter.pitch === pitch;
+}
 
 export const ADAPTER_LIBRARY = [
     {
       id: VARIABLE_SUBGRID_ADAPTER_ID,
-      name: 'Variable Sub-Grid (2.00 mm / 1.27 mm)',
+      name: 'Variable Sub-Grid',
       category: 'SMD Pads',
       pitch: 2.54,
       color: '#606060',
@@ -1742,7 +1769,9 @@ export function getAdapterForInstance(inst) {
 
   const widthPins = Math.max(1, Math.round(inst.widthPins || adapter.widthPins || 4));
   const heightPins = Math.max(1, Math.round(inst.heightPins || adapter.heightPins || 4));
-  const fallbackPitch = adapter.subGridPitches?.[0] || 2.00;
+  const basePitch = Number(inst.pitch) > 0 ? Number(inst.pitch) : adapter.pitch;
+  const supportedPitches = getVariableSubgridPitches(basePitch);
+  const fallbackPitch = supportedPitches[0] || adapter.subGridPitches?.[0] || 2.00;
   const fallbackProfile = getPitchProfile(fallbackPitch);
   const fallbackPad = fallbackProfile.padSize;
   const fallbackDrill = fallbackProfile.drillSize;
@@ -1753,21 +1782,24 @@ export function getAdapterForInstance(inst) {
   const requestedPadSize = Number(inst.subPadSize) > 0 ? Number(inst.subPadSize) : subProfile.padSize;
   const subPadSize = Math.max(0.25, Math.min(requestedPadSize, Math.max(0.25, subGridPitch - 0.15)));
   const subDrillSize = Number(inst.subGridDrill) > 0.1 ? Number(inst.subGridDrill) : subProfile.drillSize;
+  const subPadShape = VARIABLE_SUBGRID_PAD_SHAPES.includes(inst.subPadShape) ? inst.subPadShape : 'square';
   const subgridPads = buildSubgridPads({
     widthPins,
     heightPins,
-    pitch: adapter.pitch,
+    pitch: basePitch,
     subGridPitch,
     subPadSize,
+    subPadShape,
     throughPins: adapter.throughPins,
   });
 
   const subgridMask = buildSubgridMask({
     widthPins,
     heightPins,
-    pitch: adapter.pitch,
+    pitch: basePitch,
     subGridPitch,
     subPadSize,
+    subPadShape,
     maskExpansion,
     throughPins: adapter.throughPins,
   });
@@ -1775,7 +1807,7 @@ export function getAdapterForInstance(inst) {
   const subgridDrills = buildSubgridDrills({
     widthPins,
     heightPins,
-    pitch: adapter.pitch,
+    pitch: basePitch,
     subGridPitch,
     subDrillSize,
     throughPins: adapter.throughPins,
@@ -1785,11 +1817,13 @@ export function getAdapterForInstance(inst) {
     ...adapter,
     widthPins,
     heightPins,
+    pitch: basePitch,
     subGridPitch,
     subPadSize,
+    subPadShape,
     outline: {
-      width: Math.max(2.5, (widthPins - 1) * adapter.pitch + 1.6),
-      height: Math.max(2.5, (heightPins - 1) * adapter.pitch + 1.6),
+      width: Math.max(2.5, (widthPins - 1) * basePitch + 1.6),
+      height: Math.max(2.5, (heightPins - 1) * basePitch + 1.6),
     },
     features: {
       copper: subgridPads,
@@ -1805,8 +1839,7 @@ export function getAdapterForInstance(inst) {
 export function cycleVariableSubgridPitch(inst) {
   if (!inst || inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) return inst;
 
-  const adapter = getAdapter(VARIABLE_SUBGRID_ADAPTER_ID);
-  const pitches = adapter?.subGridPitches;
+  const pitches = getVariableSubgridPitches(inst.pitch);
   if (!Array.isArray(pitches) || pitches.length === 0) return inst;
 
   const currentPitch = Number(inst.subGridPitch ?? pitches[0]);
@@ -1822,6 +1855,16 @@ export function cycleVariableSubgridPitch(inst) {
     subGridPitch: nextPitch,
     subPadSize: profile.padSize,
     subGridDrill: profile.drillSize,
+  };
+}
+
+export function cycleVariableSubgridPadShape(inst) {
+  if (!inst || inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) return inst;
+  const currentIndex = Math.max(0, VARIABLE_SUBGRID_PAD_SHAPES.indexOf(inst.subPadShape));
+  const nextIndex = (currentIndex + 1) % VARIABLE_SUBGRID_PAD_SHAPES.length;
+  return {
+    ...inst,
+    subPadShape: VARIABLE_SUBGRID_PAD_SHAPES[nextIndex],
   };
 }
 
@@ -1974,7 +2017,7 @@ function round4(value) {
   return Math.round(value * 10000) / 10000;
 }
 
-function buildSubgridPads({ widthPins, heightPins, pitch, subGridPitch, subPadSize, throughPins = [] }) {
+function buildSubgridPads({ widthPins, heightPins, pitch, subGridPitch, subPadSize, subPadShape, throughPins = [] }) {
   const pads = [];
   const endX = (widthPins - 1) * pitch;
   const endY = (heightPins - 1) * pitch;
@@ -1989,14 +2032,18 @@ function buildSubgridPads({ widthPins, heightPins, pitch, subGridPitch, subPadSi
         const ty = pin.row * pitch;
         return Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout;
       });
-      if (!blocked) pads.push({ type: 'pad', x: rx, y: ry, w: subPadSize, h: subPadSize });
+      if (!blocked) {
+        pads.push(subPadShape === 'circle'
+          ? { type: 'circle', x: rx, y: ry, d: subPadSize }
+          : { type: 'pad', x: rx, y: ry, w: subPadSize, h: subPadSize });
+      }
     }
   }
 
   return pads;
 }
 
-function buildSubgridMask({ widthPins, heightPins, pitch, subGridPitch, subPadSize, maskExpansion, throughPins = [] }) {
+function buildSubgridMask({ widthPins, heightPins, pitch, subGridPitch, subPadSize, subPadShape, maskExpansion, throughPins = [] }) {
   const pads = [];
   const endX = (widthPins - 1) * pitch;
   const endY = (heightPins - 1) * pitch;
@@ -2011,7 +2058,12 @@ function buildSubgridMask({ widthPins, heightPins, pitch, subGridPitch, subPadSi
         const ty = pin.row * pitch;
         return Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout;
       });
-      if (!blocked) pads.push({ type: 'pad', x: rx, y: ry, w: subPadSize + 2*maskExpansion, h: subPadSize + 2*maskExpansion });
+      if (!blocked) {
+        const maskSize = subPadSize + 2 * maskExpansion;
+        pads.push(subPadShape === 'circle'
+          ? { type: 'circle', x: rx, y: ry, d: maskSize }
+          : { type: 'pad', x: rx, y: ry, w: maskSize, h: maskSize });
+      }
     }
   }
 

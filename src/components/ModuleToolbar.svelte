@@ -1,6 +1,6 @@
 <script>
   import { MODULE_LIBRARY } from '../lib/modules.js';
-  import { ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch } from '../lib/adapters.js';
+  import { ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch, cycleVariableSubgridPadShape, isAdapterCompatibleWithPitch, getVariableSubgridPitches } from '../lib/adapters.js';
   import { getPitchProfile } from '../lib/gridProfiles.js';
 
   let { modules = $bindable(), adapters = $bindable(), config, selectedInstanceId, onSelect, showModuleOverlays = $bindable(), showAdapterOverlays = $bindable() } = $props();
@@ -19,7 +19,7 @@
 
   // ── Adapter filtering ──
   let adapterCategories = $derived.by(() => {
-    const matching = ADAPTER_LIBRARY.filter(a => a.pitch === config.pitch);
+    const matching = ADAPTER_LIBRARY.filter(a => isAdapterCompatibleWithPitch(a, config.pitch));
     const cats = {};
     for (const a of matching) {
       (cats[a.category] ??= []).push(a);
@@ -35,7 +35,7 @@
     }
     if (selectedAdapterId) {
       const def = ADAPTER_LIBRARY.find(a => a.id === selectedAdapterId);
-      if (def && def.pitch !== config.pitch) selectedAdapterId = '';
+      if (def && !isAdapterCompatibleWithPitch(def, config.pitch)) selectedAdapterId = '';
     }
   });
 
@@ -46,9 +46,26 @@
     const filteredMods = modules.filter(m => validModIds.has(m.moduleId));
     if (filteredMods.length !== modules.length) modules = filteredMods;
 
-    const validAdpIds = new Set(ADAPTER_LIBRARY.filter(a => a.pitch === pitch).map(a => a.id));
-    const filteredAdp = adapters.filter(a => validAdpIds.has(a.adapterId));
-    if (filteredAdp.length !== adapters.length) adapters = filteredAdp;
+    const validAdpIds = new Set(ADAPTER_LIBRARY.filter(a => isAdapterCompatibleWithPitch(a, pitch)).map(a => a.id));
+    const filteredAdp = adapters
+      .filter(a => validAdpIds.has(a.adapterId))
+      .map(a => {
+        if (a.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) return a;
+        const pitches = getVariableSubgridPitches(pitch);
+        const nextPitch = pitches.some(p => Math.abs(p - Number(a.subGridPitch)) < 0.0001)
+          ? Number(a.subGridPitch)
+          : pitches[0];
+        const profile = getPitchProfile(nextPitch);
+        return {
+          ...a,
+          pitch,
+          subGridPitch: nextPitch,
+          subPadSize: profile.padSize,
+          subGridDrill: profile.drillSize,
+          subPadShape: a.subPadShape === 'circle' ? 'circle' : 'square',
+        };
+      });
+    if (JSON.stringify(filteredAdp) !== JSON.stringify(adapters)) adapters = filteredAdp;
   });
 
   // ── Grid helpers ──
@@ -100,7 +117,7 @@ function addModule() {
     const isVariableSubGrid = def.id === VARIABLE_SUBGRID_ADAPTER_ID;
     const widthPins = isVariableSubGrid ? 4 : def.widthPins;
     const heightPins = isVariableSubGrid ? 4 : def.heightPins;
-    const subGridPitch = isVariableSubGrid ? (def.subGridPitches?.[0] || 2.0) : undefined;
+    const subGridPitch = isVariableSubGrid ? (getVariableSubgridPitches(config.pitch)[0] || 2.0) : undefined;
     const subProfile = isVariableSubGrid ? getPitchProfile(subGridPitch) : null;
     const subPadSize = subProfile?.padSize;
     const subGridDrill = subProfile?.drillSize;
@@ -113,7 +130,7 @@ function addModule() {
       row: Math.max(0, Math.floor((rows - heightPins) / 2)),
       rotation: 0,
       color: def.color,
-      ...(isVariableSubGrid ? { widthPins, heightPins, subGridPitch, subPadSize, subGridDrill } : {}),
+      ...(isVariableSubGrid ? { widthPins, heightPins, pitch: config.pitch, subGridPitch, subPadSize, subGridDrill, subPadShape: 'square' } : {}),
     }];
   }
 
@@ -134,6 +151,14 @@ function addModule() {
     adapters = adapters.map(a =>
       a.id === instanceId
         ? cycleVariableSubgridPitch(a)
+        : a
+    );
+  }
+
+  function changeAdapterPadShape(instanceId) {
+    adapters = adapters.map(a =>
+      a.id === instanceId
+        ? cycleVariableSubgridPadShape(a)
         : a
     );
   }
@@ -214,7 +239,8 @@ function addModule() {
           role="button" tabindex="0">
           <span class="chip-name">⚡{inst.name}</span>
            {#if inst.adapterId === VARIABLE_SUBGRID_ADAPTER_ID}            
-            <button class="chip-action" onclick={(e) => { e.stopPropagation(); changeAdapterGrid(inst.id); }} title="Change Pitch (Space)">#</button>
+            <button class="chip-action" onclick={(e) => { e.stopPropagation(); changeAdapterGrid(inst.id); }} title="Change Sub-Grid Pitch (Space)">#</button>
+            <button class="chip-action" onclick={(e) => { e.stopPropagation(); changeAdapterPadShape(inst.id); }} title="Toggle Pad Shape (Shift+Space)">{inst.subPadShape === 'circle' ? '●' : '■'}</button>
             {:else}
             <button class="chip-action" onclick={(e) => { e.stopPropagation(); rotateAdapter(inst.id); }} title="Rotate (Space)">↻</button>
           {/if}          
