@@ -2018,6 +2018,54 @@ export const ADAPTER_LIBRARY = [
     silkLabel: { text: 'LMR-51430', rotation: 0, x: 9, y: 0, height: 0.9 },
   },
   */   
+
+    // #define IFACE_PIN_PAD_2_54 1.6  // from gridProfiles
+  // #define IFACE_PIN_DRILL_2_54 1  // from gridProfiles
+  {
+    id: 'sot23-3_2mm',
+    name: 'SOT23-3',
+    category: 'SOT',
+    pitch: 2,
+    color: '#a060c0',
+    interfacePinPad: 1.4,
+    interfacePinDrill: 0.8,
+
+    throughPins: [
+      { col: 0, row: 0, label: '1' },
+      { col: 0, row: 2, label: '2' },
+      { col: 2, row: 0, label: '3' },
+    ],
+
+    features: {
+      copper: [
+        // SMD pads
+        { type: 'pad', x: 0.863, y: 2.95, w: 1.325, h: 0.6 },   // Pin 1
+        { type: 'pad', x: 0.863, y: 1.05, w: 1.325, h: 0.6 },   // Pin 2
+        { type: 'pad', x: 3.138, y: 2, w: 1.325, h: 0.6 },   // Pin 3
+
+        // F.Cu traces
+        { type: 'trace', x1: 2.762, y1: 4.921, x2: 2.254, y2: 4.921, w: 0.3 },
+        { type: 'trace', x1: 2.254, y1: 4.921, x2: 2, y2: 5.937, w: 0.3 },
+        { type: 'trace', x1: 2.889, y1: 3.016, x2: 2.254, y2: 3.016, w: 0.3 },
+        { type: 'trace', x1: 2.254, y1: 3.016, x2: 2, y2: 2, w: 0.3 },
+        { type: 'trace', x1: 5.048, y1: 4.032, x2: 5.81, y2: 4.032, w: 0.3 },
+        { type: 'trace', x1: 5.81, y1: 4.032, x2: 6.064, y2: 2, w: 0.3 },
+      ],
+      mask: [
+        { type: 'pad', x: 0.863, y: 2.95, w: 1.425, h: 0.7 },
+        { type: 'pad', x: 0.863, y: 1.05, w: 1.425, h: 0.7 },
+        { type: 'pad', x: 3.138, y: 2, w: 1.425, h: 0.7 },
+      ],
+      silk: [
+        { type: 'circle', x: 0.563, y: 3.45, d: 0.25 },
+      ],
+    },
+
+    outline: { width: 6, height: 6 },
+    outlineOffset: { x: 0, y: 0 },
+    widthPins: 3,
+    heightPins: 3,
+  },
 ];
 
 

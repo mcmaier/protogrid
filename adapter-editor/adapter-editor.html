@@ -17,13 +17,13 @@
 <script type="text/babel">
 const { useState, useRef, useCallback, useEffect, useMemo } = React;
 
-const BASE_GRID_OPTIONS = [2.54, 2, 1.27];
+const BASE_GRID_OPTIONS = [2.54, 2.00, 1.27];
 const DEFAULT_BASE_GRID = 2.54;
 
 const BASE_PITCH_PROFILES = {
-  2.54: { pitch: 2.54, padSize: 1.6, drillSize: 1.0, defineSuffix: '2_54' },
-  2: { pitch: 2.0, padSize: 1.4, drillSize: 0.9, defineSuffix: '2_00' },
-  1.27: { pitch: 1.27, padSize: 1.0, drillSize: 0.6, defineSuffix: '1_27' },
+  '2.54': { pitch: 2.54, padSize: 1.6, drillSize: 1.0, defineSuffix: '2_54' },
+  '2': { pitch: 2.0, padSize: 1.4, drillSize: 0.9, defineSuffix: '2_00' },
+  '1.27': { pitch: 1.27, padSize: 1.0, drillSize: 0.6, defineSuffix: '1_27' },
 };
 
 const COLORS = {
@@ -495,6 +495,8 @@ function AdapterEditor() {
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
   const pxPerMm = ZOOM_LEVELS[zoom] || 18;
+  const [interfacePinPad, setInterfacePinPad] = useState(BASE_PITCH_PROFILES['2.54'].padSize);
+  const [interfacePinDrill, setInterfacePinDrill] = useState(BASE_PITCH_PROFILES['2.54'].drillSize);
 
   const toScreen = useCallback((x, y) => ({
     sx: x * pxPerMm + panOffset.x,
@@ -642,9 +644,9 @@ function AdapterEditor() {
 
     const basePitchProfile = BASE_PITCH_PROFILES[basePitchKey] || BASE_PITCH_PROFILES['2.54'];
     const defineSuffix = basePitchProfile.defineSuffix;
-    let c = `  // #define IFACE_PIN_PAD_${defineSuffix} ${basePitchProfile.padSize}  // from gridProfiles\n`;
-    c += `  // #define IFACE_PIN_DRILL_${defineSuffix} ${basePitchProfile.drillSize}  // from gridProfiles\n`;
-    c += `  {\n    id: '${id}',\n    name: '${name}',\n    category: '${category}',\n    pitch: ${basePitchProfile.pitch},\n    color: '#a060c0',\n    interfacePinPad: ${basePitchProfile.padSize},\n    interfacePinDrill: ${basePitchProfile.drillSize},\n\n`;
+    let c = `  // #define IFACE_PIN_PAD_${defineSuffix} ${interfacePinPad}  // from gridProfiles\n`;
+    c += `  // #define IFACE_PIN_DRILL_${defineSuffix} ${interfacePinDrill}  // from gridProfiles\n`;
+    c += `  {\n    id: '${id}',\n    name: '${name}',\n    category: '${category}',\n    pitch: ${baseGrid},\n    color: '#a060c0',\n    interfacePinPad: ${interfacePinPad},\n    interfacePinDrill: ${interfacePinDrill},\n\n`;
     
     c += `    throughPins: [\n`;
     throughPins.forEach(tp => { c += `      { col: ${tp.col}, row: ${tp.row}, label: '${tp.label}' },\n`; });
@@ -729,7 +731,7 @@ function AdapterEditor() {
     c += `    outline: { width: ${roundTo((widthPins - 1) * baseGrid + 2, 1)}, height: ${roundTo((heightPins - 1) * baseGrid + 2, 1)} },\n`;
     c += `    outlineOffset: { x: 0, y: 0 },\n    widthPins: ${widthPins},\n    heightPins: ${heightPins},\n  },`;
     return c;
-  }, [adapter, maskExpansion, bottomPads, bottomTraces, vias, transformPoint, transformRotation, baseGrid, basePitchKey]);
+  }, [adapter, maskExpansion, bottomPads, bottomTraces, vias, transformPoint, transformRotation, baseGrid, basePitchKey, interfacePinPad, interfacePinDrill]);
 
   const gridDots = [];
   for (let c = 0; c < adapter.widthPins; c++)
@@ -763,21 +765,21 @@ function AdapterEditor() {
               React.createElement("input", { type: "number", min: 1, max: 20, value: adapter.heightPins, onChange: e => setAdapter(a => ({ ...a, heightPins: parseInt(e.target.value) || 1 })), style: { ...inputStyle, width: 40 } }),
             ),
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Base grid (mm)"),
-            React.createElement("select", {
+              React.createElement("select", {
               value: baseGrid,
-              onChange: e => {setBaseGrid(parseFloat(e.target.value) || DEFAULT_BASE_GRID);
-                              setBasePitchKey(e.target.value)
+              onChange: e => {
+                              const nextGrid = parseFloat(e.target.value) || DEFAULT_BASE_GRID;
+                              const nextPitchKey = e.target.value;
+                              const nextProfile = BASE_PITCH_PROFILES[nextPitchKey] || BASE_PITCH_PROFILES['2.54'];
+                              setBaseGrid(nextGrid);
+                              setBasePitchKey(nextPitchKey);
+                              setInterfacePinPad(nextProfile.padSize);
+                              setInterfacePinDrill(nextProfile.drillSize);
               },
               style: inputStyle,
             },
-              /*Object.keys(BASE_PITCH_PROFILES).map(key => React.createElement("option", { key, value: key }, `${key} mm`))*/
               BASE_GRID_OPTIONS.map(v => React.createElement("option", { key: v, value: v }, `${v} mm`))
             ),
-            /*
-            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Pitch"),
-            React.createElement("select", { value: basePitchKey, onChange: e => setBasePitchKey(e.target.value), style: inputStyle },
-              Object.keys(BASE_PITCH_PROFILES).map(key => React.createElement("option", { key, value: key }, `${key} mm`))
-            ),*/
           ),
         ),
 
@@ -810,6 +812,27 @@ function AdapterEditor() {
         // TH Pins
         React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
           React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "TH PINS (click grid dots)"),
+
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "70px 1fr", gap: 4, alignItems: "center", marginBottom: 8 } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Pad (mm)"),
+            React.createElement("input", {
+              type: "number",
+              step: 0.05,
+              min: 0.1,
+              value: interfacePinPad,
+              onChange: e => setInterfacePinPad(Math.max(parseFloat(e.target.value) || 0.1, 0.1)),
+              style: { ...inputStyle, width: "100%" }
+            }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Drill (mm)"),
+            React.createElement("input", {
+              type: "number",
+              step: 0.05,
+              min: 0.05,
+              value: interfacePinDrill,
+              onChange: e => setInterfacePinDrill(Math.max(parseFloat(e.target.value) || 0.05, 0.05)),
+              style: { ...inputStyle, width: "100%" }
+            }),
+          ),
           React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 2 } },
             adapter.throughPins.map((tp, i) =>
               React.createElement("span", { key: i, style: { background: COLORS.btnBg, padding: "1px 4px", borderRadius: 2, fontSize: 10, cursor: "pointer" }, onClick: () => setAdapter(a => ({ ...a, throughPins: a.throughPins.filter((_, j) => j !== i) })) },
@@ -974,13 +997,13 @@ function AdapterEditor() {
             const { sx, sy } = toScreen(d.x, d.y);
             const isTH = adapter.throughPins.some(tp => tp.col === d.col && tp.row === d.row);
             const label = adapter.throughPins.find(tp => tp.col === d.col && tp.row === d.row)?.label;
+            const thPadR = (interfacePinPad / 2) * pxPerMm;
+            const thDrillR = (Math.min(interfacePinDrill, interfacePinPad) / 2) * pxPerMm;
             return React.createElement("g", { key: i },
               isTH ? React.createElement(React.Fragment, null,
-                //React.createElement("circle", { cx: sx, cy: sy, r: 0.8 * pxPerMm, fill: COLORS.gridDotTH }),
-                //React.createElement("circle", { cx: sx, cy: sy, r: 0.5 * pxPerMm, fill: COLORS.gridDotTHInner }),
-                React.createElement("circle", { cx: sx, cy: sy, r: (baseGrid/3) * pxPerMm, fill: COLORS.gridDotTH }),
-                React.createElement("circle", { cx: sx, cy: sy, r: (baseGrid/5) * pxPerMm, fill: COLORS.gridDotTHInner }),
-                React.createElement("text", { x: sx, y: sy + 0.25 * pxPerMm, textAnchor: "middle", fill: "#fff", fontSize: Math.max(0.45 * pxPerMm, 8), fontFamily: "monospace", style: { pointerEvents: "none" } }, label),
+                React.createElement("circle", { cx: sx, cy: sy, r: thPadR, fill: COLORS.gridDotTH }),
+                React.createElement("circle", { cx: sx, cy: sy, r: thDrillR, fill: COLORS.gridDotTHInner }),                
+                React.createElement("text", { x: sx, y: sy + 0.25 * pxPerMm, textAnchor: "middle", fill: "#fff", fontSize: Math.max(thPadR * 0.55, 8), fontFamily: "monospace", style: { pointerEvents: "none" } }, label),
               ) : React.createElement("circle", { cx: sx, cy: sy, r: 3, fill: COLORS.gridDot }),
             );
           }),
