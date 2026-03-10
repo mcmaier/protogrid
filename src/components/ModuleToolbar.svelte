@@ -49,34 +49,6 @@
     }
   });
 
-  /*
-  let availableAdapterIds = $derived(new Set(ADAPTER_LIBRARY
-    .filter(a => isAdapterCompatibleWithPitch(a, config.pitch))
-    .map(a => a.id)));
-
-  // Keep selections in sync with active pitch/options
-  $effect(() => {
-    if (selectedModuleId) {
-      const def = MODULE_LIBRARY.find(m => m.id === selectedModuleId);
-      if (!def || def.pitch !== config.pitch) selectedModuleId = '';
-    }
-
-    if (selectedAdapterId && !availableAdapterIds.has(selectedAdapterId)) {
-      selectedAdapterId = '';
-    }
-  });
-
-  $effect(() => {
-    if (selectedInstanceId === null) return;
-
-    const instanceExists = adapters.some(a => a.id === selectedInstanceId)
-      || modules.some(m => m.id === selectedInstanceId);
-
-    if (!instanceExists) onSelect(null);
-  });
-  */
-
-
   // Remove placed items that don't match the new pitch
   $effect(() => {
     const pitch = config.pitch;
@@ -206,6 +178,13 @@ function addModule() {
     adapters = [];
     modules = [];
   }
+
+  function getAdapterDisplayName(inst) {
+    if (inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) return inst.name;
+    const pitch = Number(inst.subGridPitch);
+    if (Number.isFinite(pitch)) return `Sub-Grid: (${pitch}mm)`;
+    return 'Sub-Grid';
+  }
 </script>
 
 <div class="toolbar">
@@ -276,7 +255,7 @@ function addModule() {
           onclick={() => onSelect(selectedInstanceId === inst.id ? null : inst.id)}
           onkeydown={(e) => { if (e.key === 'Enter') onSelect(selectedInstanceId === inst.id ? null : inst.id); }}
           role="button" tabindex="0">
-          <span class="chip-name">⚡{inst.name}</span>
+          <span class="chip-name">⚡{getAdapterDisplayName(inst)}</span>
            {#if inst.adapterId === VARIABLE_SUBGRID_ADAPTER_ID}            
             <button class="chip-action" onclick={(e) => { e.stopPropagation(); changeAdapterGrid(inst.id); }} title="Change Sub-Grid Pitch (Space)">#</button>
             <button class="chip-action" onclick={(e) => { e.stopPropagation(); changeAdapterPadShape(inst.id); }} title="Toggle Pad Shape (Shift+Space)">{inst.subPadShape === 'circle' ? '●' : '■'}</button>
