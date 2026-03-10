@@ -1,7 +1,7 @@
 <script>
   import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, RAIL_TRACE_WIDTH, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
   import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY } from '../lib/modules.js';
-  import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch  } from '../lib/adapters.js';
+  import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch, cycleVariableSubgridPadShape } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
   let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable(), selectedSignalTrackIndex = null, onSelectSignalTrack, showAdapterOverlays = true , showModuleOverlays = true } = $props();
@@ -661,7 +661,8 @@
       return;
     }
 
-        // Space: rotate selected module/adapter by 90° or cycle pitch of subgrid
+        // Space: rotate selected module/adapter by 90° or cycle pitch of subgrid.
+    // Shift+Space toggles variable-subgrid pad shape.
     if (e.key === ' ' && selectedInstanceId !== null) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
       e.preventDefault();
@@ -672,9 +673,10 @@
       } else {
         adapters = adapters.map(a => {
           if (a.id !== selectedInstanceId) return a;
-          return a.adapterId === VARIABLE_SUBGRID_ADAPTER_ID
-            ? cycleVariableSubgridPitch(a)
-            : { ...a, rotation: ((a.rotation || 0) + 1) % 4 };
+          if (a.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) {
+            return { ...a, rotation: ((a.rotation || 0) + 1) % 4 };
+          }
+          return e.shiftKey ? cycleVariableSubgridPadShape(a) : cycleVariableSubgridPitch(a);
         });
       }
       return;
@@ -934,6 +936,8 @@
             <rect x={a.x + b_p.x - b_p.w / 2} y={a.y + b_p.y - b_p.h / 2}
               width={b_p.w} height={b_p.h} fill="#3f7a40" fill-opacity="0.85" rx="0.12" ry="0.12"
               transform={b_p.rotation ? `rotate(${b_p.rotation}, ${a.x + b_p.x}, ${a.y + b_p.y})` : undefined}/>
+          {:else if b_p.type === 'circle'}
+            <circle cx={a.x + b_p.x} cy={a.y + b_p.y} r={b_p.d / 2} fill="#3f7a40" fill-opacity="0.85" />
           {/if}
         {/each}
 
@@ -949,6 +953,8 @@
             <rect x={a.x + f_p.x - f_p.w / 2} y={a.y + f_p.y - f_p.h / 2}
               width={f_p.w} height={f_p.h} fill="#c8a84e" fill-opacity="0.9" rx="0.15" ry="0.15"
               transform={f_p.rotation ? `rotate(${f_p.rotation}, ${a.x + f_p.x}, ${a.y + f_p.y})` : undefined}/>
+          {:else if f_p.type === 'circle'}
+            <circle cx={a.x + f_p.x} cy={a.y + f_p.y} r={f_p.d / 2} fill="#c8a84e" fill-opacity="0.9" />
           {/if}
         {/each} 
 
