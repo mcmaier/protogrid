@@ -41,28 +41,28 @@ const DEFAULT_ADAPTER = {
   smdPads: [], traces: [], throughPins: [], silkBody: null, silkLines: [], silkText: [],
 };
 
+function extractSExprBlocks(source, head) {
+  const blocks = [];
+  let pos = 0;
+  while ((pos = source.indexOf(head, pos)) !== -1) {
+    let depth = 0;
+    let end = pos;
+    for (; end < source.length; end++) {
+      if (source[end] === '(') depth++;
+      else if (source[end] === ')') {
+        depth--;
+        if (depth === 0) { end++; break; }
+      }
+    }
+    blocks.push(source.slice(pos, end));
+    pos = end;
+  }
+  return blocks;
+}
+
 function parseKicadMod(text) {
   const topPads = [], bottomPads = [], vias = [], silkLines = [];
   let bodyPoly = null, m;
-
-  const extractSExprBlocks = (source, head) => {
-    const blocks = [];
-    let pos = 0;
-    while ((pos = source.indexOf(head, pos)) !== -1) {
-      let depth = 0;
-      let end = pos;
-      for (; end < source.length; end++) {
-        if (source[end] === '(') depth++;
-        else if (source[end] === ')') {
-          depth--;
-          if (depth === 0) { end++; break; }
-        }
-      }
-      blocks.push(source.slice(pos, end));
-      pos = end;
-    }
-    return blocks;
-  };
 
   const padBlocks = extractSExprBlocks(text.replace(/\r/g, ""), "(pad ");
   for (const block of padBlocks) {
@@ -131,35 +131,41 @@ function parseKicadPcb(text) {
 
   // 2) Extract pads from footprints with absolute coordinates
   const fcuPads = [], bcuPads = [];
-  // Split into footprint blocks
-  const fpRe = /\(footprint\s+"([^"]+)"([\s\S]*?)\n\t\)/g;
-  while ((m = fpRe.exec(text)) !== null) {
-    const fpName = m[1].split(":").pop();
-    const fpBody = m[2];
-    const atMatch = fpBody.match(/^\s*\(at\s+([\d.]+)\s+([\d.]+)(?:\s+([-\d.]+))?\)/m);
+  for (const fpBlock of extractSExprBlocks(text, "(footprint ")) {
+    const nameMatch = fpBlock.match(/^\(footprint\s+"([^"]+)"/);
+    if (!nameMatch) continue;
+    const fpName = nameMatch[1].split(":").pop();
+
+    const atMatch = fpBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
     if (!atMatch) continue;
     const fx = parseFloat(atMatch[1]), fy = parseFloat(atMatch[2]);
     const fDeg = parseFloat(atMatch[3] || 0);
     const fRad = fDeg * Math.PI / 180;
     const cosR = Math.cos(fRad), sinR = Math.sin(fRad);
 
-    const padRe = /\(pad\s+"([^"]+)"\s+(\w+)\s+(\w+)\s+\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)(?:[\s\S]*?\(drill\s+([\d.]+)\))?[\s\S]*?\(layers\s+"([^"]*)"(?:\s+"([^"]*)")?(?:\s+"([^"]*)")?\)/g;
-    let pm;
-    while ((pm = padRe.exec(fpBody)) !== null) {
-      const pin = pm[1], ptype = pm[2], pshape = pm[3];
-      const px = parseFloat(pm[4]), py = parseFloat(pm[5]);
-      const pDeg = parseFloat(pm[6] || 0);
-      let sw = parseFloat(pm[7]), sh = parseFloat(pm[8]);
-      const drill = parseFloat(pm[9] || 0);
-      const layers = [pm[10], pm[11], pm[12]].filter(Boolean);
+    for (const padBlock of extractSExprBlocks(fpBlock, "(pad ")) {
+      const header = padBlock.match(/^\(pad\s+"([^"]*)"\s+(\w+)\s+(\w+)/);
+      const padAt = padBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+      const size = padBlock.match(/\(size\s+([-\d.]+)\s+([-\d.]+)\)/);
+      if (!header || !padAt || !size) continue;
 
-      // Absolute position: rotate pad pos by footprint rotation
-      const ax = fx - px * cosR + py * sinR;
+      const pin = header[1], ptype = header[2], pshape = header[3];
+      const px = parseFloat(padAt[1]), py = parseFloat(padAt[2]);
+      const pDeg = parseFloat(padAt[3] || 0);
+      const sw = parseFloat(size[1]), sh = parseFloat(size[2]);
+      const drillMatch = padBlock.match(/\(drill\s+([-\d.]+)/);
+      const drill = drillMatch ? parseFloat(drillMatch[1]) : 0;
+
+      const layerExpr = padBlock.match(/\(layers\s+([^)]*)\)/);
+      const quotedLayers = layerExpr ? [...layerExpr[1].matchAll(/"([^"]+)"/g)].map(s => s[1]) : [];
+      const bareLayers = layerExpr ? layerExpr[1].replace(/"[^"]+"/g, "").trim().split(/\s+/).filter(Boolean) : [];
+      const layers = [...quotedLayers, ...bareLayers];
+
+      // Absolute position: rotate pad pos by footprint rotation (KiCad CW Y-down)
+      const ax = fx + px * cosR - py * sinR;
       const ay = fy + px * sinR + py * cosR;
 
-      // KiCad stores pad rotation as absolute (world-relative).
-      // With RoundRect Gerber macro, rotation is handled natively — no w/h swap needed.
-      // Normalize to 0-180° range (rectangular pads are symmetric at 180°).
+      // Pad rotation: normalize to 0-180° (rectangular pads are symmetric)
       const norm = (360 - pDeg) % 360;
       const padRotation = roundTo(norm % 180, 1);
 
@@ -167,9 +173,9 @@ function parseKicadPcb(text) {
       const rx = roundTo(ax - boardLeft, 4);
       const ry = roundTo(ay - boardTop, 4);
 
-      const padData = { pin, fp: fpName, type: ptype, shape: pshape, x: rx, y: ry, w: roundTo(sw,4), h: roundTo(sh,4), drill, rotation: padRotation > 0.5 ? roundTo(padRotation, 1) : 0 };
+      const padData = { pin, fp: fpName, type: ptype, shape: pshape, x: rx, y: ry, w: roundTo(sw,4), h: roundTo(sh,4), drill, rotation: padRotation > 0.5 ? padRotation : 0 };
 
-      if (ptype === "thru_hole" || layers.includes("F.Cu") && layers.includes("B.Cu")) {
+      if (ptype === "thru_hole" || ptype === "np_thru_hole" || (layers.includes("F.Cu") && layers.includes("B.Cu")) || layers.includes("*.Cu")) {
         fcuPads.push(padData);
         bcuPads.push(padData);
       } else if (layers.includes("F.Cu")) {
@@ -212,27 +218,6 @@ function parseKicadPcb(text) {
   const silkLines = [];
   const silkText = [];
 
-  const parseFpShapeLines = (shapeRe, body, baseX, baseY, cosR, sinR) => {
-    shapeRe.lastIndex = 0;
-    let sm;
-    while ((sm = shapeRe.exec(body)) !== null) {
-      const lx1 = parseFloat(sm[1]), ly1 = parseFloat(sm[2]);
-      const lx2 = parseFloat(sm[3]), ly2 = parseFloat(sm[4]);
-
-      const x1 = baseX - lx1 * cosR + ly1 * sinR;
-      const y1 = baseY + lx1 * sinR + ly1 * cosR;
-      const x2 = baseX - lx2 * cosR + ly2 * sinR;
-      const y2 = baseY + lx2 * sinR + ly2 * cosR;
-
-      silkLines.push({
-        x1: roundTo(x1 - boardLeft, 4),
-        y1: roundTo(y1 - boardTop, 4),
-        x2: roundTo(x2 - boardLeft, 4),
-        y2: roundTo(y2 - boardTop, 4),
-      });
-    }
-  };
-
   const grSilkLineRe = /\(gr_line\s+\(start\s+([-\d.]+)\s+([-\d.]+)\)\s+\(end\s+([-\d.]+)\s+([-\d.]+)\)[\s\S]*?\(layer\s+"F\.SilkS"\)/g;
   while ((m = grSilkLineRe.exec(text)) !== null) {
     silkLines.push({
@@ -245,77 +230,68 @@ function parseKicadPcb(text) {
 
   const fpSilkLineRe = /\(fp_line\s+\(start\s+([-\d.]+)\s+([-\d.]+)\)\s+\(end\s+([-\d.]+)\s+([-\d.]+)\)[\s\S]*?\(layer\s+"F\.SilkS"\)/g;
   const fpSilkRectRe = /\(fp_rect\s+\(start\s+([-\d.]+)\s+([-\d.]+)\)\s+\(end\s+([-\d.]+)\s+([-\d.]+)\)[\s\S]*?\(layer\s+"F\.SilkS"\)/g;
-  fpRe.lastIndex = 0;
-  while ((m = fpRe.exec(text)) !== null) {
-    const fpName = m[1].split(":").pop();
-    const fpBody = m[2];
-    const atMatch = fpBody.match(/^\s*\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/m);
-    if (!atMatch) continue;
 
+  const addSilkLine = (lx1, ly1, lx2, ly2, fx, fy, cosR, sinR) => {
+    const x1 = fx + lx1 * cosR - ly1 * sinR;
+    const y1 = fy + lx1 * sinR + ly1 * cosR;
+    const x2 = fx + lx2 * cosR - ly2 * sinR;
+    const y2 = fy + lx2 * sinR + ly2 * cosR;
+    silkLines.push({ x1: roundTo(x1 - boardLeft, 4), y1: roundTo(y1 - boardTop, 4), x2: roundTo(x2 - boardLeft, 4), y2: roundTo(y2 - boardTop, 4) });
+  };
+
+  for (const fpBlock of extractSExprBlocks(text, "(footprint ")) {
+    const nameMatch = fpBlock.match(/^\(footprint\s+"([^"]+)"/);
+    if (!nameMatch) continue;
+    const fpName = nameMatch[1].split(":").pop();
+
+    const atMatch = fpBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+    if (!atMatch) continue;
     const fx = parseFloat(atMatch[1]), fy = parseFloat(atMatch[2]);
-    const fRad = parseFloat(atMatch[3] || 0) * Math.PI / 180;
+    const fDeg = parseFloat(atMatch[3] || 0);
+    const fRad = fDeg * Math.PI / 180;
     const cosR = Math.cos(fRad), sinR = Math.sin(fRad);
 
-    parseFpShapeLines(fpSilkLineRe, fpBody, fx, fy, cosR, sinR);
-
-    let rm;
-    while ((rm = fpSilkRectRe.exec(fpBody)) !== null) {
-      const x1 = parseFloat(rm[1]), y1 = parseFloat(rm[2]);
-      const x2 = parseFloat(rm[3]), y2 = parseFloat(rm[4]);
-      const corners = [
-        [x1, y1, x2, y1],
-        [x2, y1, x2, y2],
-        [x2, y2, x1, y2],
-        [x1, y2, x1, y1],
-      ];
-      const rectBody = corners.map(c => `(fp_line (start ${c[0]} ${c[1]}) (end ${c[2]} ${c[3]}) (layer "F.SilkS"))`).join("\n");
-      parseFpShapeLines(fpSilkLineRe, rectBody, fx, fy, cosR, sinR);
+    // fp_line silkscreen
+    let sm;
+    fpSilkLineRe.lastIndex = 0;
+    while ((sm = fpSilkLineRe.exec(fpBlock)) !== null) {
+      addSilkLine(parseFloat(sm[1]), parseFloat(sm[2]), parseFloat(sm[3]), parseFloat(sm[4]), fx, fy, cosR, sinR);
     }
-    fpSilkRectRe.lastIndex = 0;
 
-    const addSilkText = (text, tx, ty, tRot, fontH) => {
+    // fp_rect silkscreen (expand to 4 lines)
+    let rm;
+    fpSilkRectRe.lastIndex = 0;
+    while ((rm = fpSilkRectRe.exec(fpBlock)) !== null) {
+      const x1 = parseFloat(rm[1]), y1 = parseFloat(rm[2]), x2 = parseFloat(rm[3]), y2 = parseFloat(rm[4]);
+      addSilkLine(x1, y1, x2, y1, fx, fy, cosR, sinR);
+      addSilkLine(x2, y1, x2, y2, fx, fy, cosR, sinR);
+      addSilkLine(x2, y2, x1, y2, fx, fy, cosR, sinR);
+      addSilkLine(x1, y2, x1, y1, fx, fy, cosR, sinR);
+    }
+
+    const addSilkTextEntry = (txt, tx, ty, tRot, fontH) => {
       const absX = fx + tx * cosR - ty * sinR;
       const absY = fy + tx * sinR + ty * cosR;
-      const absRot = ((parseFloat(atMatch[3] || 0) + tRot) % 360 + 360) % 360;
-
-      silkText.push({
-        text,
-        fp: fpName,
-        x: roundTo(absX - boardLeft, 4),
-        y: roundTo(absY - boardTop, 4),
-        height: roundTo(fontH, 4),
-        rotation: roundTo(absRot, 2),
-      });
+      const absRot = ((fDeg + tRot) % 360 + 360) % 360;
+      silkText.push({ text: txt, fp: fpName, x: roundTo(absX - boardLeft, 4), y: roundTo(absY - boardTop, 4), height: roundTo(fontH, 4), rotation: roundTo(absRot, 2) });
     };
 
     // Older KiCad syntax: (fp_text reference "R1" ...)
     const fpRefTextRe = /\(fp_text\s+reference\s+"([^"]+)"\s+\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)[\s\S]*?\(layer\s+"F\.SilkS"\)[\s\S]*?\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/g;
     let tm;
-    while ((tm = fpRefTextRe.exec(fpBody)) !== null) {
-      addSilkText(tm[1], parseFloat(tm[2]), parseFloat(tm[3]), parseFloat(tm[4] || 0), parseFloat(tm[6]));
+    while ((tm = fpRefTextRe.exec(fpBlock)) !== null) {
+      addSilkTextEntry(tm[1], parseFloat(tm[2]), parseFloat(tm[3]), parseFloat(tm[4] || 0), parseFloat(tm[6]));
     }
 
-    // KiCad v7/v8 syntax: (property "Reference" "R1" (at ...) (layer "F.SilkS") ...)
-    const fpRefPropRe = /\(property\s+"Reference"\s+"([^"]+)"([\s\S]*?)\n\s*\)/g;
-    while ((tm = fpRefPropRe.exec(fpBody)) !== null) {
-      const propText = tm[1];
-      const propBody = tm[2];
-
-      if (!/\(layer\s+"F\.SilkS"\)/.test(propBody)) continue;
-
-      const propAt = propBody.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
-      if (!propAt) continue;
-
-      const propFont = propBody.match(/\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/);
+    // KiCad v7+ syntax: (property "Reference" ...)
+    for (const propBlock of extractSExprBlocks(fpBlock, '(property "Reference"')) {
+      if (!/\(layer\s+"F\.SilkS"\)/.test(propBlock)) continue;
+      const nameM = propBlock.match(/^\(property\s+"Reference"\s+"([^"]+)"/);
+      const propAt = propBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+      if (!nameM || !propAt) continue;
+      const propFont = propBlock.match(/\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/);
       const fontH = propFont ? parseFloat(propFont[2]) : 1;
-
-      addSilkText(
-        propText,
-        parseFloat(propAt[1]),
-        parseFloat(propAt[2]),
-        parseFloat(propAt[3] || 0),
-        fontH,
-      );
+      addSilkTextEntry(nameM[1], parseFloat(propAt[1]), parseFloat(propAt[2]), parseFloat(propAt[3] || 0), fontH);
     }
   }
 
@@ -409,15 +385,29 @@ function kicadPcbToAdapter(parsed) {
   // Flip Y: editor uses Y-up, KiCad uses Y-down. newY = boardH - oldY
   const flipY = (y) => roundTo(boardH - y, 4);
 
-  // Convert pads (F.Cu only for display, numbered by position)
   // KiCad CW rotation in Y-down becomes CCW in Y-up after flip — matches Gerber convention directly
-  const smdPads = fcuPads.map((p, i) => ({
+  const toPad = (p, i) => ({
     pin: parseInt(p.pin) || (i + 1),
     x: p.x, y: flipY(p.y),
     w: p.w, h: p.h,
     rotation: -p.rotation || 0,
     fp: p.fp, netPin: p.pin,
-  }));
+  });
+
+  // F.Cu SMD pads only (thru_hole handled separately as drills)
+  const smdPads = fcuPads.filter(p => p.type !== 'thru_hole').map(toPad);
+
+  // B.Cu SMD pads
+  const bottomPads = bcuPads.filter(p => p.type !== 'thru_hole').map(toPad);
+
+  // Thru_hole pads become drill entries (vias)
+  const thruHoleDrills = fcuPads
+    .filter(p => p.type === 'thru_hole' && p.drill > 0)
+    .map(p => ({
+      x: p.x, y: flipY(p.y),
+      size: roundTo(Math.max(p.w, p.h), 3),
+      drill: roundTo(p.drill, 3),
+    }));
 
   // Convert F.Cu traces
   const topTraces = fcuTraces.map(t => ({
@@ -431,10 +421,11 @@ function kicadPcbToAdapter(parsed) {
     layer: "B.Cu", net: t.net,
   }));
 
-  // Convert vias
-  const editorVias = vias.map(v => ({
-    x: v.x, y: flipY(v.y), size: v.size, drill: v.drill,
-  }));
+  // Convert vias + thru_hole pads
+  const editorVias = [
+    ...vias.map(v => ({ x: v.x, y: flipY(v.y), size: v.size, drill: v.drill })),
+    ...thruHoleDrills,
+  ];
 
   const editorSilkLines = silkLines.map(s => ({
     x1: s.x1,
@@ -454,6 +445,7 @@ function kicadPcbToAdapter(parsed) {
 
   return {
     smdPads,
+    bottomPads,
     topTraces,
     bottomTraces,
     vias: editorVias,
@@ -978,9 +970,10 @@ function AdapterEditor() {
                 if (Math.abs(w.x - p.x) < p.w / 2 + 0.3 && Math.abs(w.y - p.y) < p.h / 2 + 0.3) { setSelectedPad(i); return; }
               }
               for (let i = 0; i < adapter.traces.length; i++) {
-                for (const s of adapter.traces[i].segments) {
-                  const mx = (s.x1 + s.x2) / 2, my = (s.y1 + s.y2) / 2;
-                  if (Math.abs(w.x - mx) < 0.8 && Math.abs(w.y - my) < 0.8) { setSelectedTrace(i); return; }
+                const tr = adapter.traces[i];
+                for (const s of tr.segments) {
+                  const tm = transformTracePoint(tr, (s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2);
+                  if (Math.abs(w.x - tm.x) < 0.8 && Math.abs(w.y - tm.y) < 0.8) { setSelectedTrace(i); return; }
                 }
               }
             } else if (tool === "trace") {
@@ -1033,8 +1026,8 @@ function AdapterEditor() {
           (showLayer === "F.Cu" || showLayer === "both") && adapter.traces.map((t, ti) =>
             React.createElement("g", { key: `t${ti}` },
               t.segments.map((s, si) => {
-                const t1 = transformPoint(s.x1, s.y1);
-                const t2 = transformPoint(s.x2, s.y2);
+                const t1 = transformTracePoint(t, s.x1, s.y1);
+                const t2 = transformTracePoint(t, s.x2, s.y2);
                 const p1 = toScreen(t1.x, t1.y);
                 const p2 = toScreen(t2.x, t2.y);
                 return React.createElement("line", {
