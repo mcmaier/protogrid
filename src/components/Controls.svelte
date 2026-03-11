@@ -1,7 +1,7 @@
 <script>
   import { computeSignalGrid, computeMinSize, BOARD_MIN_WIDTH, BOARD_MAX_WIDTH, BOARD_MIN_HEIGHT, BOARD_MAX_HEIGHT, MOUNT_EDGE_MIN, MOUNT_EDGE_MAX } from '../lib/gerber.js';
 
-  let { config = $bindable(), pendingPitch = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [], signalTrackDrawMode = $bindable(), onToggleSignalTrackDrawMode = $bindable(), onDeleteCustomTracks, onDeleteAllCustomTracks, selectedSignalTrackIndex = null } = $props();
+  let { config = $bindable(), pendingPitch = $bindable(), onExport, onSaveProject, onLoadProject, resolvedAdapters = [], signalTrackDrawMode = $bindable(), onToggleSignalTrackDrawMode = $bindable(), onDeleteCustomTracks, onDeleteAllCustomTracks, selectedSignalTrackIndex = null, silkLineDrawMode = false, onToggleSilkLineDrawMode, onDeleteSilkLine, onDeleteAllSilkLines, selectedSilkLineIndex = null } = $props();
 
   let minSize = $derived(computeMinSize(config.pitch, config.powerRails, config.mountingHoles));
   let effMinW = $derived(Math.max(BOARD_MIN_WIDTH, minSize.minWidth));
@@ -22,7 +22,9 @@
 
   let trackDrawMode = $derived(signalTrackDrawMode);
   let trackDrawModeToggle = $derived(onToggleSignalTrackDrawMode);
-  let customTrackCount = $derived((config.signalTracks || []).length);  
+  let customTrackCount = $derived((config.signalTracks || []).length);
+  let customSilkLineCount = $derived((config.silkLines || []).length);
+
   
 
   $effect(() => {
@@ -196,81 +198,94 @@
     <div class="warning">Board has no signal pads!</div>
   {/if}
 
-  <div class="control-group">
-    <h3>Power Rails &amp; Signal Tracks</h3>
-    <div class="rail-toggles quad">
-      <button class="rail-btn" class:active={config.powerRails.top}
-        onclick={() => toggleRail('top')}>Top</button>
-      <button class="rail-btn" class:active={config.powerRails.bottom}
-        onclick={() => toggleRail('bottom')}>Bottom</button>
-      <button class="rail-btn" class:active={config.powerRails.left}
-        onclick={() => toggleRail('left')}>Left</button>
-      <button class="rail-btn" class:active={config.powerRails.right}
-        onclick={() => toggleRail('right')}>Right</button>
-    </div>
-  </div>
-
-  <div class="control-group">
-    <div class="track-actions">
-      <button class="rail-btn" class:active={trackDrawMode} onclick={trackDrawModeToggle}>
-          {trackDrawMode ? '✏️ Drawing...' : 'Draw Track'}
-      </button>
-      <button class="rail-btn track-delete-btn" onclick={onDeleteCustomTracks} disabled={selectedSignalTrackIndex === null}>
-        Delete Selected
-      </button>
-      <button class="rail-btn track-delete-btn" onclick={onDeleteAllCustomTracks} disabled={customTrackCount === 0}>
-        Delete All ({customTrackCount})
-      </button>
-    </div>
-    {#if trackDrawMode}
-      <div class="track-hints">Click start → click end · Right-click to finish chain · ESC to cancel · Ctrl+Z undo</div>
-    {/if}
-  </div>
-
-  <div class="control-group">
-    <h3>Mounting Holes</h3>
-    <div class="rail-toggles triple">
-      <button class="rail-btn" class:active={config.mountingHoles.mode === 'none'}
-        onclick={() => setMountMode('none')}>Off</button>
-      <button class="rail-btn" class:active={config.mountingHoles.mode === 'diagonal'}
-        onclick={() => setMountMode('diagonal')}>2× Diagonal</button>
-      <button class="rail-btn" class:active={config.mountingHoles.mode === '4corners'}
-        onclick={() => setMountMode('4corners')}>4× Corners</button>
-    </div>
-
-    {#if config.mountingHoles.mode !== 'none'}
-      <label>
-        Diameter
-        <select value={config.mountingHoles.diameter} onchange={setMountDiameter}>
-          <option value={2.5}>2.5 mm</option>
-          <option value={3.2}>3.2 mm (M3)</option>
-          <option value={4.0}>4.0 mm</option>
-        </select>
-      </label>
-
-      <div class="slider-field">
-        <span class="slider-label">Edge Distance (mm)</span>
-        <div class="slider-row">
-          <input type="range" class="slider"
-            min={MOUNT_EDGE_MIN} max={MOUNT_EDGE_MAX} step="0.5"
-            value={config.mountingHoles.edgeDistance}
-            oninput={onSliderEdgeDist} />
-          <input type="text" class="slider-text"
-            bind:value={edgeDistText}
-            onblur={commitEdgeDist}
-            onkeydown={(e) => onKeydown(e, commitEdgeDist)} />
-        </div>
+  <div class="control-section">
+    <div class="control-group">
+      <h3>Mounting Holes</h3>
+      <div class="rail-toggles triple">
+        <button class="rail-btn" class:active={config.mountingHoles.mode === 'none'}
+          onclick={() => setMountMode('none')}>Off</button>
+        <button class="rail-btn" class:active={config.mountingHoles.mode === 'diagonal'}
+          onclick={() => setMountMode('diagonal')}>2× Diagonal</button>
+        <button class="rail-btn" class:active={config.mountingHoles.mode === '4corners'}
+          onclick={() => setMountMode('4corners')}>4× Corners</button>
       </div>
-    {/if}
-  </div>
 
-  <div class="control-group">
-    <h3>Labels (Silkscreen)</h3>
-    <div class="rail-toggles">
-      <button class="rail-btn" class:active={config.labels.rows > 0}
-        onclick={() => cycleLabelStep('rows')}>{labelButtonText('rows')}</button>
-      <button class="rail-btn" class:active={config.labels.cols > 0}
-        onclick={() => cycleLabelStep('cols')}>{labelButtonText('cols')}</button>
+      {#if config.mountingHoles.mode !== 'none'}
+        <label>
+          Diameter
+          <select value={config.mountingHoles.diameter} onchange={setMountDiameter}>
+            <option value={2.5}>2.5 mm</option>
+            <option value={3.2}>3.2 mm (M3)</option>
+            <option value={4.0}>4.0 mm</option>
+          </select>
+        </label>
+
+        <div class="slider-field">
+          <span class="slider-label">Edge Distance (mm)</span>
+          <div class="slider-row">
+            <input type="range" class="slider"
+              min={MOUNT_EDGE_MIN} max={MOUNT_EDGE_MAX} step="0.5"
+              value={config.mountingHoles.edgeDistance}
+              oninput={onSliderEdgeDist} />
+            <input type="text" class="slider-text"
+              bind:value={edgeDistText}
+              onblur={commitEdgeDist}
+              onkeydown={(e) => onKeydown(e, commitEdgeDist)} />
+          </div>
+        </div>
+      {/if}
+    </div>
+
+    <div class="control-group">
+      <h3>Power Rails &amp; Signal Tracks</h3>
+      <div class="rail-toggles quad">
+        <button class="rail-btn" class:active={config.powerRails.top}
+          onclick={() => toggleRail('top')}>Top</button>
+        <button class="rail-btn" class:active={config.powerRails.bottom}
+          onclick={() => toggleRail('bottom')}>Bottom</button>
+        <button class="rail-btn" class:active={config.powerRails.left}
+          onclick={() => toggleRail('left')}>Left</button>
+        <button class="rail-btn" class:active={config.powerRails.right}
+          onclick={() => toggleRail('right')}>Right</button>
+      </div>
+      <div class="track-actions">
+        <button class="rail-btn" class:active={trackDrawMode} onclick={trackDrawModeToggle}>
+            {trackDrawMode ? '✏️ Drawing...' : 'Draw Track'}
+        </button>
+        <button class="rail-btn track-delete-btn" onclick={onDeleteCustomTracks} disabled={selectedSignalTrackIndex === null}>
+          Del. Selected
+        </button>
+        <button class="rail-btn track-delete-btn" onclick={onDeleteAllCustomTracks} disabled={customTrackCount === 0}>
+          Del. All ({customTrackCount})
+        </button>
+      </div>
+      {#if trackDrawMode}
+        <div class="track-hints">Click start → click end · Right-click to finish chain · ESC to cancel · Ctrl+Z undo</div>
+      {/if}
+    </div>  
+
+    <div class="control-group">
+      <h3>Silkscreen Labels and Lines</h3>
+      <div class="rail-toggles">
+        <button class="rail-btn" class:active={config.labels.rows > 0}
+          onclick={() => cycleLabelStep('rows')}>{labelButtonText('rows')}</button>
+        <button class="rail-btn" class:active={config.labels.cols > 0}
+          onclick={() => cycleLabelStep('cols')}>{labelButtonText('cols')}</button>
+      </div>
+      <div class="track-actions">
+        <button class="rail-btn" class:active={silkLineDrawMode} onclick={onToggleSilkLineDrawMode}>
+          {silkLineDrawMode ? '✏️ Drawing...' : 'Draw Line'}
+        </button>
+        <button class="rail-btn track-delete-btn" onclick={onDeleteSilkLine} disabled={selectedSilkLineIndex === null}>
+          Del. Selected
+        </button>
+        <button class="rail-btn track-delete-btn" onclick={onDeleteAllSilkLines} disabled={customSilkLineCount === 0}>
+          Del. All ({customSilkLineCount})
+        </button>
+      </div>
+      {#if silkLineDrawMode}
+        <div class="track-hints">Click start → click end · Right-click to finish chain · ESC to cancel · Ctrl+Z undo</div>
+      {/if}
     </div>
   </div>
 
@@ -306,19 +321,19 @@
 
 <style>
   .controls {
-    display: flex; flex-direction: column; gap: 16px; padding: 20px;
+    display: flex; flex-direction: column; gap: 12px; padding: 16px;
     background: #1f1f1f; border-radius: 12px;
     color: #fcfaf9; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px;
   }
 
-  h2 { margin: 0; font-size: 18px; color: #89b4fa; font-weight: 600; }
+  h2 { margin: 0; font-size: 17px; color: #89b4fa; font-weight: 600; }
 
   h3 {
-    margin: 0 0 8px 0; font-size: 13px; color: #a6adc8;
+    margin: 0 0 5px 0; font-size: 12px; color: #a6adc8;
     text-transform: uppercase; letter-spacing: 0.5px;
   }
 
-  .control-group { display: flex; flex-direction: column; gap: 10px; }
+  .control-group { display: flex; flex-direction: column; gap: 8px; }
 
   label {
     display: flex; justify-content: space-between;
@@ -334,7 +349,7 @@
 
   /* Slider + text combo */
   .slider-field { display: flex; flex-direction: column; gap: 4px; }
-  .slider-label { font-size: 13px; color: #a6adc8; }
+  .slider-label { font-size: 12px; color: #a6adc8; }
 
   .slider-row {
     display: flex; align-items: center; gap: 10px;
@@ -370,9 +385,9 @@
   .rail-toggles.quad { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; }
 
   .rail-btn {
-    padding: 8px; background: #313244; border: 1px solid #45475a;
+    padding: 6px 8px; background: #313244; border: 1px solid #45475a;
     border-radius: 6px; color: #a6adc8; cursor: pointer;
-    font-size: 13px; transition: all 0.15s ease;
+    font-size: 12px; transition: all 0.15s ease;
   }
   .rail-btn:hover { background: #45475a; }
   .rail-btn.active { background: #89b4fa22; border-color: #89b4fa; color: #89b4fa; }
@@ -385,12 +400,13 @@
 
   .track-actions .rail-btn {
     flex: 1;
+    min-height: 36px;
   }
 
   .track-delete-btn {
     flex: 0.7 !important;
     font-size: 11px;
-    padding: 6px 8px;
+    padding: 5px 6px;
   }
 
   .track-delete-btn:disabled {
@@ -407,7 +423,7 @@
 
   .info {
     display: flex; justify-content: space-between;
-    padding: 10px 12px; background: #313244;
+    padding: 7px 10px; background: #313244;
     border-radius: 6px; font-size: 12px; color: #9ba3c5;
   }
 
@@ -417,13 +433,19 @@
   }
 
   .export-btn {
-    padding: 12px; background: #f8c000; color: #1e1e2e;
+    padding: 10px; background: #f8c000; color: #1e1e2e;
     border: none; border-radius: 8px;
-    font-size: 15px; font-weight: 600; cursor: pointer;
+    font-size: 14px; font-weight: 600; cursor: pointer;
     transition: background 0.15s ease;
   }
   .export-btn:hover { background: #c49800; }
   .export-btn:disabled { background: #585b70; cursor: not-allowed; }
+
+  .control-section {
+    display: flex; flex-direction: column; gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #45475a;
+  }
 
   .project-section {
     display: flex; flex-direction: column; gap: 8px;
@@ -434,7 +456,7 @@
   .project-actions {
     display: flex;
     gap: 8px;
-    margin-top: 8px;
+    margin-top: 4px;
   }
 
   .secondary-btn {

@@ -31,6 +31,7 @@
       cols: 0,
     },
     signalTracks: [],
+    silkLines: [],
   }, 2.54);
 
   let config = $state(structuredClone(defaultConfig));
@@ -41,6 +42,8 @@
   let showAdapterOverlays = $state(true);
   let showModuleOverlays = $state(true);
   let selectedSignalTrackIndex = $state(null);
+  let silkLineDrawMode = $state(false);
+  let selectedSilkLineIndex = $state(null);
   let pendingPitch = $state(defaultConfig.pitch);
 
   let resolvedAdapters = $derived(adapters.map(inst => ({
@@ -93,6 +96,8 @@
       selectedInstanceId = null;
       selectedSignalTrackIndex = null;
       signalTrackDrawMode = false;
+      silkLineDrawMode = false;
+      selectedSilkLineIndex = null;
 
       if (imported.isFutureVersion) {
         alert('Projektdatei wurde mit einer neueren Version erstellt. Nicht bekannte Felder wurden ignoriert.');
@@ -174,6 +179,21 @@
   $effect(() => {
     if (signalTrackDrawMode) {
       selectedSignalTrackIndex = null;
+      silkLineDrawMode = false;
+    }
+  });
+
+  $effect(() => {
+    if (silkLineDrawMode) {
+      selectedSilkLineIndex = null;
+      signalTrackDrawMode = false;
+    }
+  });
+
+  $effect(() => {
+    const count = (config.silkLines || []).length;
+    if (selectedSilkLineIndex !== null && selectedSilkLineIndex >= count) {
+      selectedSilkLineIndex = null;
     }
   });
 
@@ -184,6 +204,38 @@
     };
     selectedSignalTrackIndex = null;
     signalTrackDrawMode = false;
+  }
+
+  function toggleSilkLineDrawMode() {
+    silkLineDrawMode = !silkLineDrawMode;
+    if (!silkLineDrawMode) {
+      selectedSilkLineIndex = null;
+    }
+  }
+
+  function clearSilkLine() {
+    if (selectedSilkLineIndex === null) return;
+    config = {
+      ...config,
+      silkLines: (config.silkLines || []).filter((_, index) => index !== selectedSilkLineIndex),
+    };
+    selectedSilkLineIndex = null;
+    silkLineDrawMode = false;
+  }
+
+  function selectSilkLine(index) {
+    selectedSilkLineIndex = index;
+    selectedInstanceId = null;
+    selectedSignalTrackIndex = null;
+  }
+
+  function clearAllSilkLines() {
+    config = {
+      ...config,
+      silkLines: [],
+    };
+    selectedSilkLineIndex = null;
+    silkLineDrawMode = false;
   }
   
   $effect(() => {
@@ -205,13 +257,16 @@ if (pendingPitch === config.pitch) return;
     config = applyPitchProfile({
       ...config,
       signalTracks: [],
+      silkLines: [],
     }, nextPitch);
-    
+
     adapters = [];
     modules = [];
     selectedInstanceId = null;
     signalTrackDrawMode = false;
     selectedSignalTrackIndex = null;
+    silkLineDrawMode = false;
+    selectedSilkLineIndex = null;
     pendingPitch = config.pitch;
   });
 </script>
@@ -236,11 +291,11 @@ if (pendingPitch === config.pitch) return;
 
   <div class="ppp-layout">
     <aside class="ppp-sidebar">
-      <Controls bind:config bind:pendingPitch onExport={handleExport} onSaveProject={handleSaveProject} onLoadProject={handleLoadProject} {resolvedAdapters} signalTrackDrawMode={signalTrackDrawMode} onToggleSignalTrackDrawMode={toggleSignalTrackDrawMode} onDeleteCustomTracks={clearCustomSignalTracks} {selectedSignalTrackIndex} onDeleteAllCustomTracks={clearAllCustomSignalTracks} />
+      <Controls bind:config bind:pendingPitch onExport={handleExport} onSaveProject={handleSaveProject} onLoadProject={handleLoadProject} {resolvedAdapters} signalTrackDrawMode={signalTrackDrawMode} onToggleSignalTrackDrawMode={toggleSignalTrackDrawMode} onDeleteCustomTracks={clearCustomSignalTracks} {selectedSignalTrackIndex} onDeleteAllCustomTracks={clearAllCustomSignalTracks} {silkLineDrawMode} onToggleSilkLineDrawMode={toggleSilkLineDrawMode} onDeleteSilkLine={clearSilkLine} onDeleteAllSilkLines={clearAllSilkLines} {selectedSilkLineIndex} />
     </aside>
     <main class="ppp-main">
       <ModuleToolbar bind:modules bind:adapters {config} {selectedInstanceId} {onSelect} bind:showAdapterOverlays bind:showModuleOverlays />
-      <Preview bind:config bind:modules bind:adapters bind:signalTrackDrawMode {selectedInstanceId} {onSelect} {selectedSignalTrackIndex} onSelectSignalTrack={selectSignalTrack} {showAdapterOverlays} {showModuleOverlays} />
+      <Preview bind:config bind:modules bind:adapters bind:signalTrackDrawMode {selectedInstanceId} {onSelect} {selectedSignalTrackIndex} onSelectSignalTrack={selectSignalTrack} {showAdapterOverlays} {showModuleOverlays} bind:silkLineDrawMode {selectedSilkLineIndex} onSelectSilkLine={selectSilkLine} />
     </main>
   </div>  
   <div class="ppp-footer">

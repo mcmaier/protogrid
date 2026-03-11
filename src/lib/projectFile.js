@@ -21,6 +21,7 @@ function sanitizeConfig(rawConfig, defaults) {
   const mountingHoles = isObject(config.mountingHoles) ? config.mountingHoles : {};
   const labels = isObject(config.labels) ? config.labels : {};
   const signalTracks = Array.isArray(config.signalTracks) ? config.signalTracks : [];
+  const silkLines = Array.isArray(config.silkLines) ? config.silkLines : [];
 
   return {
     width: toNumber(config.width, defaults.width),
@@ -51,6 +52,14 @@ function sanitizeConfig(rawConfig, defaults) {
         startRow: Math.floor(toNumber(track.startRow, 0)),
         endCol: Math.floor(toNumber(track.endCol, 0)),
         endRow: Math.floor(toNumber(track.endRow, 0)),
+      })),
+    silkLines: silkLines
+      .filter(line => isObject(line))
+      .map(line => ({
+        startCol: Math.floor(toNumber(line.startCol, 0)),
+        startRow: Math.floor(toNumber(line.startRow, 0)),
+        endCol: Math.floor(toNumber(line.endCol, 0)),
+        endRow: Math.floor(toNumber(line.endRow, 0)),
       })),
   };
 }

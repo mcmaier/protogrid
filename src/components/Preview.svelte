@@ -1,10 +1,10 @@
 <script>
-  import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, getTraceWidth, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
+  import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, generateSilkLineSegments, getTraceWidth, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
   import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY } from '../lib/modules.js';
   import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch, cycleVariableSubgridPadShape } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
-  let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable(), selectedSignalTrackIndex = null, onSelectSignalTrack, showAdapterOverlays = true , showModuleOverlays = true } = $props();
+  let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable(), selectedSignalTrackIndex = null, onSelectSignalTrack, showAdapterOverlays = true, showModuleOverlays = true, silkLineDrawMode = $bindable(), selectedSilkLineIndex = null, onSelectSilkLine } = $props();
 
   let fullConfig = $derived({
     ...config,
@@ -13,6 +13,9 @@
   const minZoomLevel = 0.8;
 
   let trackDrawMode = $derived(signalTrackDrawMode);
+  let silkDrawMode = $derived(silkLineDrawMode);
+  let customSilkLines = $derived(Array.isArray(config.silkLines) ? config.silkLines : []);
+  let silkLineSegments = $derived(generateSilkLineSegments(fullConfig, resolvedAdapters));
 
   // Resolve adapter definitions with rotation applied
   let resolvedAdapters = $derived(adapters.map(inst => ({
@@ -385,6 +388,53 @@
     return { col, row };
   }
 
+  function snapToSilkPoint(e) {
+    const pt = getSvgPoint(e);
+    const halfPitch = config.pitch / 2;
+    // Snap only to odd half-pitch positions — these are exactly between drills
+    const rawCol = (pt.x - grid.gridLeft) / halfPitch;
+    const rawRow = (pt.y - grid.gridBottom) / halfPitch;
+    const col = Math.round((rawCol - 1) / 2) * 2 + 1;
+    const row = Math.round((rawRow - 1) / 2) * 2 + 1;
+    // Valid range: -1 to 2*(cols-1)+1 — one half-pitch step outside the grid on each edge
+    const maxCol = 2 * (grid.cols - 1) + 1;
+    const maxRow = 2 * (grid.rows - 1) + 1;
+    if (grid.cols < 1 || grid.rows < 1 || col < -1 || col > maxCol || row < -1 || row > maxRow) return null;
+    return { col, row };
+  }
+
+  function findSilkLineNearPoint(point) {
+    const lines = Array.isArray(config.silkLines) ? config.silkLines : [];
+    if (lines.length === 0) return null;
+    const halfPitch = config.pitch / 2;
+    const tolerance = Math.max(0.4, config.pitch * 0.25);
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      const sx = grid.gridLeft + line.startCol * halfPitch;
+      const sy = grid.gridBottom + line.startRow * halfPitch;
+      const ex = grid.gridLeft + line.endCol * halfPitch;
+      const ey = grid.gridBottom + line.endRow * halfPitch;
+
+      let distance;
+      if (Math.abs(sy - ey) < 0.001) {
+        const minX = Math.min(sx, ex) - tolerance;
+        const maxX = Math.max(sx, ex) + tolerance;
+        if (point.x < minX || point.x > maxX) continue;
+        distance = Math.abs(point.y - sy);
+      } else if (Math.abs(sx - ex) < 0.001) {
+        const minY = Math.min(sy, ey) - tolerance;
+        const maxY = Math.max(sy, ey) + tolerance;
+        if (point.y < minY || point.y > maxY) continue;
+        distance = Math.abs(point.x - sx);
+      } else {
+        continue;
+      }
+      if (distance <= tolerance) return i;
+    }
+    return null;
+  }
+
   function findSignalTrackNearPoint(point) {
     const tracks = Array.isArray(config.signalTracks) ? config.signalTracks : [];
     if (tracks.length === 0) return null;
@@ -427,7 +477,48 @@
       : { col: start.col, row: point.row };
   }
 
+  function onSilkLinePointerDown(e, lineIndex) {
+    if (silkDrawMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect(null);
+    onSelectSilkLine?.(lineIndex);
+  }
+
   function onPreviewPointerDown(e) {
+    if (silkDrawMode && e.button === 0 && !e.ctrlKey && !dragging) {
+      const snapped = snapToSilkPoint(e);
+      if (snapped) {
+        e.preventDefault();
+        e.stopPropagation();
+        onSelect(null);
+
+        if (!silkLineStart) {
+          silkLineStart = snapped;
+          silkLineHover = snapped;
+        } else {
+          const end = projectTrackEnd(silkLineStart, snapped);
+          if (end.col !== silkLineStart.col || end.row !== silkLineStart.row) {
+            const nextLines = [
+              ...(config.silkLines || []),
+              {
+                startCol: silkLineStart.col,
+                startRow: silkLineStart.row,
+                endCol: end.col,
+                endRow: end.row,
+              },
+            ];
+            config.silkLines = nextLines;
+            selectedSilkLineIndex = nextLines.length - 1;
+          }
+          silkLineStart = end;
+          silkLineHover = end;
+          onSelect(null);
+        }
+        return;
+      }
+    }
+
     if (trackDrawMode && e.button === 0 && !e.ctrlKey && !dragging) {
       const snapped = snapToGridPoint(e);
       if (snapped) {
@@ -488,6 +579,7 @@
       if (isBackground) {
         onSelect(null);
         onSelectSignalTrack?.(null);
+        onSelectSilkLine?.(null);
       }
     }
   }
@@ -529,11 +621,28 @@
   let touchState = $state(null); // { startTouches, startPanX, startPanY, startZoom }
   let signalTrackStart = $state(null);
   let signalTrackHover = $state(null);
+  let silkLineStart = $state(null);
+  let silkLineHover = $state(null);
 
   $effect(() => {
     if (!trackDrawMode) {
       signalTrackStart = null;
       signalTrackHover = null;
+    }
+  });
+
+  $effect(() => {
+    if (!silkDrawMode) {
+      silkLineStart = null;
+      silkLineHover = null;
+    }
+  });
+
+  $effect(() => {
+    const lines = config.silkLines || [];
+    if (selectedSilkLineIndex === null) return;
+    if (selectedSilkLineIndex < 0 || selectedSilkLineIndex >= lines.length) {
+      selectedSilkLineIndex = null;
     }
   });
 
@@ -546,9 +655,15 @@
   });
 
   function onPreviewPointerMove(e) {
-    if (!trackDrawMode || !signalTrackStart) return;
-    const snapped = snapToGridPoint(e);
-    signalTrackHover = snapped ? projectTrackEnd(signalTrackStart, snapped) : null;
+    if (trackDrawMode && signalTrackStart) {
+      const snapped = snapToGridPoint(e);
+      signalTrackHover = snapped ? projectTrackEnd(signalTrackStart, snapped) : null;
+      return;
+    }
+    if (silkDrawMode && silkLineStart) {
+      const snapped = snapToSilkPoint(e);
+      silkLineHover = snapped ? projectTrackEnd(silkLineStart, snapped) : null;
+    }
   }
 
   function getTouchCenter(touches) {
@@ -608,6 +723,18 @@
 
 
     function onPreviewContextMenu(e) {
+    if (silkDrawMode) {
+      e.preventDefault();
+      if (silkLineStart) {
+        silkLineStart = null;
+        silkLineHover = null;
+        selectedSilkLineIndex = null;
+      } else {
+        silkLineDrawMode = false;
+        selectedSilkLineIndex = null;
+      }
+      return;
+    }
     if (trackDrawMode) {
       e.preventDefault();
       if (signalTrackStart) {
@@ -624,6 +751,19 @@
   }
 
   function onWindowKeyDown(e) {
+    if (e.key === 'Escape' && silkDrawMode) {
+      e.preventDefault();
+      if (silkLineStart) {
+        silkLineStart = null;
+        silkLineHover = null;
+        selectedSilkLineIndex = null;
+      } else {
+        silkLineDrawMode = false;
+        selectedSilkLineIndex = null;
+      }
+      return;
+    }
+
   if (e.key === 'Escape' && trackDrawMode) {
       e.preventDefault();
       if (signalTrackStart) {
@@ -644,6 +784,12 @@
       // Don't intercept if user is typing in an input
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
+      if (selectedSilkLineIndex !== null) {
+        e.preventDefault();
+        config.silkLines = (config.silkLines || []).filter((_, i) => i !== selectedSilkLineIndex);
+        selectedSilkLineIndex = null;
+        return;
+      }
       if (selectedSignalTrackIndex !== null) {
         e.preventDefault();
         config.signalTracks = (config.signalTracks || []).filter((_, i) => i !== selectedSignalTrackIndex);
@@ -684,8 +830,21 @@
       return;
     }
     
-    // Ctrl+Z: undo last track
+    // Ctrl+Z: undo last silk line or track
     if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      if (silkDrawMode) {
+        const lines = config.silkLines || [];
+        if (lines.length > 0) {
+          e.preventDefault();
+          config.silkLines = lines.slice(0, -1);
+          selectedSilkLineIndex = null;
+          if (silkLineStart) {
+            silkLineStart = null;
+            silkLineHover = null;
+          }
+        }
+        return;
+      }
       const tracks = config.signalTracks || [];
       if (tracks.length > 0) {
         e.preventDefault();
@@ -870,8 +1029,48 @@
       stroke-linejoin="round"
       fill="none"
     />
-     {/each}  
-  
+  {/each}
+
+  <!-- Custom silk lines: clipped segments for actual visual -->
+  {#each silkLineSegments as seg}
+    <line x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
+      stroke={colors.silkscreen} stroke-width="0.15" stroke-linecap="round" opacity="0.9" />
+  {/each}
+  <!-- Raw silk lines: invisible hitbox + selection highlight only -->
+  {#each customSilkLines as line, index}
+    {@const halfPitch = config.pitch / 2}
+    {@const x1 = grid.gridLeft + line.startCol * halfPitch}
+    {@const y1 = grid.gridBottom + line.startRow * halfPitch}
+    {@const x2 = grid.gridLeft + line.endCol * halfPitch}
+    {@const y2 = grid.gridBottom + line.endRow * halfPitch}
+    {#if selectedSilkLineIndex === index}
+      <line {x1} {y1} {x2} {y2}
+        stroke="#f9e2af" stroke-width="0.35" stroke-dasharray="0.4 0.2"
+        stroke-linecap="round" opacity="0.7" />
+    {/if}
+    <!-- Wider invisible hitbox for click selection -->
+    <line {x1} {y1} {x2} {y2}
+      stroke="transparent" stroke-width="0.6" stroke-linecap="round"
+      onpointerdown={(e) => onSilkLinePointerDown(e, index)}
+      style="cursor: pointer;" />
+  {/each}
+
+  <!-- Silk line drawing preview -->
+  {#if silkDrawMode && silkLineStart}
+    {@const halfPitch = config.pitch / 2}
+    {@const sx = grid.gridLeft + silkLineStart.col * halfPitch}
+    {@const sy = grid.gridBottom + silkLineStart.row * halfPitch}
+    <circle cx={sx} cy={sy} r={0.3} fill={colors.silkscreen} opacity="0.9" />
+    {#if silkLineHover && (silkLineHover.col !== silkLineStart.col || silkLineHover.row !== silkLineStart.row)}
+      {@const ex = grid.gridLeft + silkLineHover.col * halfPitch}
+      {@const ey = grid.gridBottom + silkLineHover.row * halfPitch}
+      <line x1={sx} y1={sy} x2={ex} y2={ey}
+        stroke={colors.silkscreen} stroke-width="0.15"
+        stroke-dasharray="0.5 0.3" stroke-linecap="round" opacity="0.95" />
+      <circle cx={ex} cy={ey} r={0.25} fill="none" stroke={colors.silkscreen} stroke-width="0.12" opacity="0.8" />
+    {/if}
+  {/if}
+
   <!-- Adapter overlays (real Gerber features) -->
   {#each sortedAdapters as inst (inst.id)}
     {@const a = adapterToMm(inst)}
@@ -969,8 +1168,16 @@
         {/each}
 
         {#each a.def.throughPins as pin}
-          <circle cx={a.x + pin.col * a.pitch} cy={a.y + pin.row * a.pitch}
-            r={copperDia / 2} fill="#c8a84e" />
+          {#if pin.label === '1'}
+            {@const px = a.x + pin.col * a.pitch}
+            {@const py = a.y + pin.row * a.pitch}
+            {@const rr = copperDia * 0.2}
+            <rect x={px - copperDia/2} y={py - copperDia/2}
+              width={copperDia} height={copperDia} rx={rr} ry={rr} fill="#c8a84e" />
+          {:else}
+            <circle cx={a.x + pin.col * a.pitch} cy={a.y + pin.row * a.pitch}
+              r={copperDia / 2} fill="#c8a84e" />
+          {/if}
           <circle cx={a.x + pin.col * a.pitch} cy={a.y + pin.row * a.pitch}
             r={config.drillDiameter / 2} fill="#1a1a1a" />
         {/each}

@@ -867,7 +867,28 @@ function AdapterEditor() {
       overlay,
     };
 
-    return JSON.stringify(obj, null, 2);
+    // Custom formatter: keep leaf objects (all-primitive values) on one line
+    const formatJson = (val, indent) => {
+      if (val === null || typeof val !== 'object') return JSON.stringify(val);
+      if (Array.isArray(val)) {
+        if (val.length === 0) return '[]';
+        const items = val.map(v => formatJson(v, indent + '  '));
+        // If every item is a leaf object or primitive, put each on its own line but compact
+        const isLeafArray = val.every(v => v !== null && typeof v === 'object' && !Array.isArray(v) &&
+          Object.values(v).every(x => x === null || typeof x !== 'object'));
+        if (isLeafArray) {
+          return '[\n' + items.map(s => indent + '  ' + s).join(',\n') + '\n' + indent + ']';
+        }
+        return '[\n' + items.map(s => indent + '  ' + s).join(',\n') + '\n' + indent + ']';
+      }
+      const isLeaf = Object.values(val).every(v => v === null || typeof v !== 'object');
+      if (isLeaf) {
+        return '{ ' + Object.entries(val).map(([k, v]) => JSON.stringify(k) + ': ' + JSON.stringify(v)).join(', ') + ' }';
+      }
+      const lines = Object.entries(val).map(([k, v]) => indent + '  ' + JSON.stringify(k) + ': ' + formatJson(v, indent + '  '));
+      return '{\n' + lines.join(',\n') + '\n' + indent + '}';
+    };
+    return formatJson(obj, '');
   }, [adapter, maskExpansion, bottomPads, bottomTraces, vias, transformPoint, transformRotation, transformTracePoint, baseGrid, basePitchKey, interfacePinPad, interfacePinDrill]);
 
   const downloadJson = () => {

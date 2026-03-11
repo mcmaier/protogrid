@@ -36,6 +36,17 @@ export function getTraceWidth(pitch) {
   return TRACE_WIDTHS[pitch] ?? 0.8;
 }
 
+export const LABEL_HEIGHTS = {
+  2.54: 1.0,
+  2.00: 0.9,
+  1.27: 0.7,
+};
+
+/** Return silkscreen label height for a given grid pitch, with fallback to 1.0mm. */
+export function getLabelHeight(pitch) {
+  return LABEL_HEIGHTS[pitch] ?? 1.0;
+}
+
 /** Board size constraints (mm) */
 export const BOARD_MIN_WIDTH = 20;
 export const BOARD_MAX_WIDTH = 200;
@@ -52,8 +63,6 @@ export const MOUNT_DIAMETERS = [2.5, 3.2, 4.0];
 export const MOUNT_EDGE_MIN = 3;
 export const MOUNT_EDGE_MAX = 15.0;
 
-/** Label height in mm */
-export const LABEL_HEIGHT = 1;
 /** Label step interval (every N-th row/col gets a label) */
 export const LABEL_STEP = 5;
 
@@ -192,7 +201,7 @@ export function computeGrid(config) {
   const { width, height, pitch, labels = {}, drillDiameter = 1.0, annularRing = 0.3 } = config;
 
   // Label dimension constants (must match generateLabelStrokes)
-  const h = LABEL_HEIGHT;
+  const h = getLabelHeight(pitch);
   const copperRadius = (drillDiameter + annularRing * 2) / 2;
   const labelGap = copperRadius + h * 0.8; // distance from pad center to text anchor
 
@@ -205,8 +214,9 @@ export function computeGrid(config) {
   }
 
   // Base margin: enough to keep pads away from board edge
-  const baseMargin = pitch * 0.5 + copperRadius;
   const edgePad = 0.5; // clearance to board edge
+  const baseMargin = pitch * 0.5 + copperRadius;
+  
 
   // Row labels on left+right: gap from pad center + text width + edge clearance
   let marginCols = baseMargin;
@@ -217,11 +227,15 @@ export function computeGrid(config) {
     marginCols = Math.max(baseMargin, labelGap + textWidth(maxDigits) + edgePad);
   }
 
+  // Minimum bottom margin to always fit the branding line
+  // brandY = gridBottom - (copperRadius + h*0.8) - 0.1, text half-height = h*0.5
+  const brandingMargin = copperRadius + h * 1.3 + edgePad;
+
   // Column labels on top+bottom: gap from pad center + text half-height + edge clearance
-  let marginRows = baseMargin;
+  let marginRows = Math.max(baseMargin, brandingMargin);
   let offsetRows = 0;
   if (labels.cols) {
-    marginRows = Math.max(baseMargin, labelGap + h * 0.5 + edgePad);
+    marginRows = Math.max(marginRows, labelGap + h * 0.5 + edgePad);
   }
 
   // Number of columns/rows that fit
@@ -475,6 +489,88 @@ function buildAdapterObstacles(placedAdapters, gridLeft, gridBottom, pitch) {
 }
 
 /**
+ * Generate clipped silk line segments from config.silkLines.
+ * Silk lines are stored in half-pitch units (odd values = between drills).
+ * Lines are clipped around adapter bounding boxes with halfPitch margin.
+ * Returns array of {x1, y1, x2, y2} in mm.
+ */
+export function generateSilkLineSegments(config, placedAdapters = []) {
+  const lines = Array.isArray(config.silkLines) ? config.silkLines : [];
+  if (lines.length === 0) return [];
+
+  const { pitch } = config;
+  const { gridLeft, gridBottom } = computeGrid(config);
+  const halfPitch = pitch / 2;
+  const margin = halfPitch;
+
+  const adapterBoxes = placedAdapters
+    .filter(inst => inst._adapterDef)
+    .map(inst => {
+      const adapter = inst._adapterDef;
+      const ax = gridLeft + (inst.col || 0) * pitch;
+      const ay = gridBottom + (inst.row || 0) * pitch;
+      return {
+        xMin: ax - margin,
+        xMax: ax + (adapter.widthPins - 1) * pitch + margin,
+        yMin: ay - margin,
+        yMax: ay + (adapter.heightPins - 1) * pitch + margin,
+      };
+    });
+
+  // Mounting holes: circular keepout = hole radius + clearance margin
+  const mountHoles = computeMountingHoles(config).map(h => ({
+    x: h.x, y: h.y, r: h.diameter / 2 + MOUNT_KEEPOUT_MARGIN,
+  }));
+
+  const result = [];
+  for (const line of lines) {
+    const x1 = gridLeft + line.startCol * halfPitch;
+    const y1 = gridBottom + line.startRow * halfPitch;
+    const x2 = gridLeft + line.endCol * halfPitch;
+    const y2 = gridBottom + line.endRow * halfPitch;
+
+    const isHorizontal = Math.abs(y1 - y2) < 0.001;
+    const isVertical = Math.abs(x1 - x2) < 0.001;
+    if (!isHorizontal && !isVertical) continue;
+
+    if (isHorizontal) {
+      const y = y1;
+      const minX = Math.min(x1, x2);
+      const maxX = Math.max(x1, x2);
+      const exclusions = [];
+      for (const box of adapterBoxes) {
+        if (y <= box.yMin + 0.001 || y >= box.yMax - 0.001) continue;
+        exclusions.push([box.xMin, box.xMax]);
+      }
+      for (const h of mountHoles) {
+        const dy = Math.abs(y - h.y);
+        if (dy >= h.r) continue;
+        const halfChord = Math.sqrt(h.r * h.r - dy * dy);
+        exclusions.push([h.x - halfChord, h.x + halfChord]);
+      }
+      result.push(...buildSegments(minX, maxX, exclusions, (a, b) => ({ x1: a, y1: y, x2: b, y2: y })));
+    } else {
+      const x = x1;
+      const minY = Math.min(y1, y2);
+      const maxY = Math.max(y1, y2);
+      const exclusions = [];
+      for (const box of adapterBoxes) {
+        if (x <= box.xMin + 0.001 || x >= box.xMax - 0.001) continue;
+        exclusions.push([box.yMin, box.yMax]);
+      }
+      for (const h of mountHoles) {
+        const dx = Math.abs(x - h.x);
+        if (dx >= h.r) continue;
+        const halfChord = Math.sqrt(h.r * h.r - dx * dx);
+        exclusions.push([h.y - halfChord, h.y + halfChord]);
+      }
+      result.push(...buildSegments(minY, maxY, exclusions, (a, b) => ({ x1: x, y1: a, x2: x, y2: b })));
+    }
+  }
+  return result;
+}
+
+/**
  * Clip a single trace around circular keepout zones AND adapter obstacles.
  * Margin per edge depends on trace direction vs which edges have TH pads:
  * - Horizontal trace enters left/exits right: use hasLeftTH/hasRightTH for X margins
@@ -673,6 +769,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
   gerber += padShape === 'square'
     ? `%ADD12R,${copperPadDia.toFixed(6)}X${copperPadDia.toFixed(6)}*%\n`
     : `%ADD12C,${copperPadDia.toFixed(6)}*%\n`; // GND pad
+  gerber += roundRectAperture(13, copperPadDia, copperPadDia); // Pin-1 TH pad (roundRect marker)
   gerber += `%ADD20C,${getTraceWidth(pitch).toFixed(6)}*%\n`; // Rail/signal trace
 
   // Mounting hole keepout aperture (clear copper around holes)
@@ -808,7 +905,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
       const key = `${fmtCoord(x)},${fmtCoord(y)}`;
       if (!thSeen.has(key)) {
         thSeen.add(key);
-        adapterFeatures.push({ type: 'th', x, y });
+        adapterFeatures.push({ type: 'th', x, y, isPin1: pin.label === '1' });
       }
     }
     
@@ -879,7 +976,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
       gerber += `X${fmtCoord(f.x1)}Y${fmtCoord(f.y1)}D02*\n`;
       gerber += `X${fmtCoord(f.x2)}Y${fmtCoord(f.y2)}D01*\n`;
     } else if (f.type === 'th') {
-      gerber += `D10*\n`;
+      gerber += f.isPin1 ? `D13*\n` : `D10*\n`;
       gerber += `X${fmtCoord(f.x)}Y${fmtCoord(f.y)}D03*\n`;
     }
   }
@@ -901,6 +998,7 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
 
   const maskDia = drillDiameter + annularRing * 2 + maskExpansion * 2;
   gerber += `%ADD10C,${maskDia.toFixed(6)}*%\n`;
+  gerber += roundRectAperture(13, maskDia, maskDia); // Pin-1 TH mask opening (roundRect marker)
 
   // Mounting hole mask opening (expose copper-free area)
   if (holes.length > 0) {
@@ -1019,7 +1117,7 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
         const key = `${fmtCoord(x)},${fmtCoord(y)}`;
         if (!maskThSeen.has(key)) {
           maskThSeen.add(key);
-          adapterMask.push({ x, y, aperture: 10 });
+          adapterMask.push({ x, y, aperture: pin.label === '1' ? 13 : 10 });
         }
       }
     }
@@ -1087,7 +1185,13 @@ export function generateSilkscreen(config, placedAdapters = []) {
       gerber += `X${fmtCoord(polyline[i].x)}Y${fmtCoord(polyline[i].y)}D01*\n`;
     }
   }
-  
+
+  // Custom silk lines (clipped around adapters)
+  for (const seg of generateSilkLineSegments(config, placedAdapters)) {
+    gerber += `X${fmtCoord(seg.x1)}Y${fmtCoord(seg.y1)}D02*\n`;
+    gerber += `X${fmtCoord(seg.x2)}Y${fmtCoord(seg.y2)}D01*\n`;
+  }
+
   // Adapter silkscreen features
   for (const inst of placedAdapters) {
     const adapter = inst._adapterDef;
@@ -1194,7 +1298,7 @@ export function generateLabelStrokes(config) {
   const { gridLeft, gridTop, gridRight, gridBottom, cols, rows } = computeGrid(config);
   const holes = computeMountingHoles(config);
   const allStrokes = [];
-  const h = LABEL_HEIGHT;
+  const h = getLabelHeight(pitch);
   const copperRadius = (drillDiameter + annularRing * 2) / 2;
   // Gap = enough to clear the copper pad edge + small margin
   const gap = copperRadius + h * 0.8;
@@ -1253,8 +1357,8 @@ export function generateLabelStrokes(config) {
     for (let row = sigRowStart; row <= sigRowEnd; row++) {
       const sigRow = row - sigRowStart;
       const y = gridTop - row * pitch;
-      const xLeft = gridLeft - gap;
-      const xRight = gridRight + gap;
+      const xLeft = gridLeft - gap + 0.2;
+      const xRight = gridRight + gap - 0.2;
 
       if (shouldLabel(sigRow, sigRowCount, rowStep)) {
         const text = String(sigRow + 1);
@@ -1306,15 +1410,15 @@ export function generateLabelStrokes(config) {
 
   // ── Branding (bottom-right, shifted if holes block) ──
   const brandText = 'MACGIZMO.COM/GRIDGEN';
-  const brandH = LABEL_HEIGHT;
+  const brandH = getLabelHeight(pitch);
   const scale = brandH / 5;
   const charWidth = 3 * scale;
   const charGap = 1 * scale;
   const brandWidth = brandText.length * charWidth + (brandText.length - 1) * charGap;
 
   // Desired position: right-aligned at gridRight, below grid
-  let brandX = gridRight + gap;
-  let brandY = gridBottom - gap;
+  let brandX = gridRight + gap - 0.2;
+  let brandY = gridBottom - gap - 0.2;
 
   // Find if any hole blocks the branding area
   // Check along the text extent (right-aligned, so text runs from brandX-brandWidth to brandX)
