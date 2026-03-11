@@ -20,11 +20,21 @@ import { getTextStrokes, colLabel } from './font.js';
 /** Number of grid rows/cols used per rail (VCC + GND) */
 export const RAIL_ROWS = 2;
 
-/** Trace width for power rail connections (mm) */
-export const RAIL_TRACE_WIDTH = 0.8;
+/**
+ * Trace width per grid pitch (mm).
+ * Used for both power rail and signal track traces.
+ * Keys are pitch values matching the available grid options.
+ */
+export const TRACE_WIDTHS = {
+  2.54: 0.8,
+  2.00: 0.7,
+  1.27: 0.5,
+};
 
-/** Trace width used in Gerber aperture for rails (mm) */
-export const GERBER_RAIL_TRACE_WIDTH = 0.8;
+/** Return trace width for a given grid pitch, with fallback to 0.8mm. */
+export function getTraceWidth(pitch) {
+  return TRACE_WIDTHS[pitch] ?? 0.8;
+}
 
 /** Board size constraints (mm) */
 export const BOARD_MIN_WIDTH = 20;
@@ -33,7 +43,7 @@ export const BOARD_MIN_HEIGHT = 10;
 export const BOARD_MAX_HEIGHT = 200;
 
 /** Mounting hole constants */
-export const MOUNT_KEEPOUT_MARGIN = 0.5; // mm clearance around mounting hole (per side)
+export const MOUNT_KEEPOUT_MARGIN = 0.6; // mm clearance around mounting hole (per side)
 
 /** Available mounting hole diameters */
 export const MOUNT_DIAMETERS = [2.5, 3.2, 4.0];
@@ -663,7 +673,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
   gerber += padShape === 'square'
     ? `%ADD12R,${copperPadDia.toFixed(6)}X${copperPadDia.toFixed(6)}*%\n`
     : `%ADD12C,${copperPadDia.toFixed(6)}*%\n`; // GND pad
-  gerber += `%ADD20C,${GERBER_RAIL_TRACE_WIDTH.toFixed(6)}*%\n`; // Rail trace
+  gerber += `%ADD20C,${getTraceWidth(pitch).toFixed(6)}*%\n`; // Rail/signal trace
 
   // Mounting hole keepout aperture (clear copper around holes)
   if (holes.length > 0) {
@@ -1143,8 +1153,8 @@ export function generateSilkscreen(config, placedAdapters = []) {
     
     // Corner markers at the four corners of the adapter rectangle
     // Small L-shaped brackets: corner vertex outside the pad, arms pointing inward
-    const cLen = 1.3; // arm length in mm
-    const cOff = 1.1; // corner vertex offset from pad center (outward)
+    const cLen = config.pitch / 2; // arm length in mm
+    const cOff = config.pitch / 2; // corner vertex offset from pad center (outward)
 
     const corners = [
       { col: 0,                    row: 0,                     dx:  1, dy:  1 },

@@ -1,5 +1,5 @@
 <script>
-  import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, RAIL_TRACE_WIDTH, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
+  import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, getTraceWidth, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
   import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY } from '../lib/modules.js';
   import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch, cycleVariableSubgridPadShape } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
@@ -23,6 +23,7 @@
   let pads = $derived(generatePadPositions(fullConfig, resolvedAdapters));
   let traces = $derived(generatePowerRailTraces(fullConfig, resolvedAdapters));
   let signalTraces = $derived(generateSignalTraces(fullConfig, resolvedAdapters));
+  let traceWidth = $derived(getTraceWidth(config.pitch));
   let customSignalTracks = $derived(Array.isArray(config.signalTracks) ? config.signalTracks : []);;
   let mountHoles = $derived(computeMountingHoles(fullConfig));
   let labelStrokes = $derived(generateLabelStrokes(fullConfig));
@@ -752,7 +753,7 @@
       x1={t.x1} y1={t.y1}
       x2={t.x2} y2={t.y2}
       stroke={colors.signal}
-      stroke-width={RAIL_TRACE_WIDTH}
+      stroke-width={traceWidth}
       stroke-linecap="round"
       opacity="0.85"
     />
@@ -769,7 +770,7 @@
       x1={x1} y1={y1}
       x2={x2} y2={y2}
       stroke="#f9e2af"
-      stroke-width={RAIL_TRACE_WIDTH + 0.4}
+      stroke-width={traceWidth + 0.4}
       stroke-linecap="round"
       opacity="0.9"
     />
@@ -779,7 +780,7 @@
       x1={x1} y1={y1}
       x2={x2} y2={y2}
       stroke="transparent"
-      stroke-width={RAIL_TRACE_WIDTH + 0.8}
+      stroke-width={traceWidth + 0.8}
       stroke-linecap="round"
       onpointerdown={(e) => onSignalTrackPointerDown(e, index)}
       style="cursor: pointer;"
@@ -793,7 +794,7 @@
       x2={t.x2} y2={t.y2}
       //stroke={t.type === 'vcc' ? colors.vcc : colors.gnd}
       stroke={colors[t.type] || colors.signal}
-      stroke-width={RAIL_TRACE_WIDTH}
+      stroke-width={traceWidth}
       stroke-linecap="round"
       opacity="0.6"
     />
@@ -849,7 +850,7 @@
       x1={sx} y1={sy}
       x2={ex} y2={ey}
       stroke="#f9e2af"
-      stroke-width={RAIL_TRACE_WIDTH}
+      stroke-width={traceWidth}
       stroke-dasharray="0.8 0.4"
       stroke-linecap="round"
       opacity="0.95"
@@ -1014,9 +1015,9 @@
           ] as corner}
             {@const cx = a.x + corner.col * a.pitch}
             {@const cy = a.y + corner.row * a.pitch}
-            {@const vx = cx - corner.dx * 1.1}
-            {@const vy = cy - corner.dy * 1.1}
-            <path d="M {vx} {vy} L {vx + corner.dx * 1.3} {vy} M {vx} {vy} L {vx} {vy + corner.dy * 1.3}"
+            {@const vx = cx - corner.dx * a.pitch/2}
+            {@const vy = cy - corner.dy * a.pitch/2}
+            <path d="M {vx} {vy} L {vx + corner.dx * a.pitch/2} {vy} M {vx} {vy} L {vx} {vy + corner.dy * a.pitch/2}"
               stroke="#e8e8e8" stroke-width="0.15" stroke-linecap="round"
               fill="none" opacity="0.7" />            
         {/each}
