@@ -74,6 +74,7 @@ function sanitizePlacedItems(rawItems, key) {
       subPadSize: toNumber(item.subPadSize, 1),
       subPadDrill: toNumber(item.subPadDrill, 1),
       subPadShape: typeof item.subPadShape === 'string' ? item.subPadShape : "square",
+      showOptionalFeatures: item.showOptionalFeatures === true,
     }));
 }
 

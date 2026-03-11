@@ -173,6 +173,20 @@ function addModule() {
     );
   }
 
+  function toggleAdapterOptionalFeatures(instanceId) {
+    adapters = adapters.map(a =>
+      a.id === instanceId
+        ? { ...a, showOptionalFeatures: !a.showOptionalFeatures }
+        : a
+    );
+  }
+
+  function adapterHasOptionalFeatures(adapterId) {
+    const def = ADAPTER_LIBRARY.find(a => a.id === adapterId);
+    const opt = /** @type {any} */ (def)?.optionalFeatures;
+    return opt && Object.values(opt).some(arr => Array.isArray(arr) && arr.length > 0);
+  }
+
   function clearAll() {
     onSelect(null);
     adapters = [];
@@ -261,6 +275,9 @@ function addModule() {
             <button class="chip-action" onclick={(e) => { e.stopPropagation(); changeAdapterPadShape(inst.id); }} title="Toggle Pad Shape (Shift+Space)">{inst.subPadShape === 'circle' ? '●' : inst.subPadShape === 'square-smd' ? '□' : '■'}</button>
             {:else}
             <button class="chip-action" onclick={(e) => { e.stopPropagation(); rotateAdapter(inst.id); }} title="Rotate (Space)">↻</button>
+            {#if adapterHasOptionalFeatures(inst.adapterId)}
+            <button class="chip-action" class:chip-action-on={inst.showOptionalFeatures} onclick={(e) => { e.stopPropagation(); toggleAdapterOptionalFeatures(inst.id); }} title="Toggle Optional Features (Shift+Space)">⊕</button>
+            {/if}
           {/if}          
           <button class="chip-action chip-remove" onclick={(e) => { e.stopPropagation(); removeAdapter(inst.id); }} title="Remove (Del)">×</button>
         </div>
@@ -406,6 +423,7 @@ function addModule() {
     opacity: 0.7;
   }
   .chip-action:hover { opacity: 1; }
+  .chip-action-on { opacity: 1; color: #a6e3a1; }
   .chip-remove { color: #f38ba8; }
 
   .chip-clear {

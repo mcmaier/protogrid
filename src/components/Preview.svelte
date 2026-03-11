@@ -156,7 +156,7 @@
 
     /** Convert adapter grid position to board mm and get its features */
   function adapterToMm(inst) {
-    const def = getAdapterForInstance(inst);
+    const def = /** @type {any} */ (getAdapterForInstance(inst));
     if (!def) return null;
     const pitch = config.pitch;
     const x = grid.gridLeft + (inst.col || 0) * pitch;
@@ -674,6 +674,7 @@
         adapters = adapters.map(a => {
           if (a.id !== selectedInstanceId) return a;
           if (a.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) {
+            if (e.shiftKey) return { ...a, showOptionalFeatures: !a.showOptionalFeatures };
             return { ...a, rotation: ((a.rotation || 0) + 1) % 4 };
           }
           return e.shiftKey ? cycleVariableSubgridPadShape(a) : cycleVariableSubgridPitch(a);
@@ -886,6 +887,7 @@
       {@const pinH = (a.def.heightPins - 1) * a.pitch}
       {@const ofsX = (outW - pinW) / 2 - oOfs.x}
       {@const ofsY = (outH - pinH) / 2 - oOfs.y}
+
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <g class="module-overlay adapter-overlay"
         class:dragging={dragging?.instanceId === inst.id}

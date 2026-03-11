@@ -383,7 +383,24 @@ export function getAdapterForInstance(inst) {
   const adapter = getRotatedAdapter(inst.adapterId, inst.rotation || 0);
   if (!adapter) return null;
 
-  if (adapter.id !== VARIABLE_SUBGRID_ADAPTER_ID) return adapter;
+  if (adapter.id !== VARIABLE_SUBGRID_ADAPTER_ID) {
+    const optionalFeatures = /** @type {any} */ (adapter).optionalFeatures;
+    if (inst.showOptionalFeatures && optionalFeatures) {
+      const opt = optionalFeatures;
+      return {
+        ...adapter,
+        features: {
+          copper:    [...(adapter.features?.copper    || []), ...(opt.copper    || [])],
+          copperBack:[...( adapter.features?.copperBack|| []), ...(opt.copperBack|| [])],
+          mask:      [...(adapter.features?.mask      || []), ...(opt.mask      || [])],
+          silk:      [...(adapter.features?.silk      || []), ...(opt.silk      || [])],
+          silkText:  [...(adapter.features?.silkText  || []), ...(opt.silkText  || [])],
+          drills:    [...(adapter.features?.drills    || []), ...(opt.drills    || [])],
+        },
+      };
+    }
+    return adapter;
+  }
 
   const widthPins = Math.max(1, Math.round(inst.widthPins || adapter.widthPins || 4));
   const heightPins = Math.max(1, Math.round(inst.heightPins || adapter.heightPins || 4));
@@ -578,6 +595,16 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
     silkLabel = { ...silkLabel, x: p.x, y: p.y, rotation: textRot };
   }
 
+  const srcOpt = /** @type {any} */ (adapter).optionalFeatures;
+  const rotatedOptionalFeatures = srcOpt ? {
+    copper:    srcOpt.copper    ? srcOpt.copper.map(rotFeature)    : undefined,
+    copperBack:srcOpt.copperBack? srcOpt.copperBack.map(rotFeature): undefined,
+    drills:    srcOpt.drills    ? srcOpt.drills.map(d => { const p = rotPt(d.x, d.y); return { ...d, x: p.x, y: p.y }; }) : undefined,
+    mask:      srcOpt.mask      ? srcOpt.mask.map(rotFeature)      : undefined,
+    silk:      srcOpt.silk      ? srcOpt.silk.map(rotFeature)      : undefined,
+    silkText:  srcOpt.silkText  ? srcOpt.silkText.map(rotFeature)  : undefined,
+  } : undefined;
+
   return {
     ...adapter,
     throughPins, widthPins, heightPins, outline,
@@ -593,6 +620,7 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
       silk: adapter.features.silk ? adapter.features.silk.map(rotFeature) : undefined,
       silkText: adapter.features.silkText ? adapter.features.silkText.map(rotFeature) : undefined,
     },
+    ...(rotatedOptionalFeatures ? { optionalFeatures: rotatedOptionalFeatures } : {}),
   };
 }
 
