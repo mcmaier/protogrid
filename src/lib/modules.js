@@ -24,7 +24,22 @@
 /** Base path for module overlay PNGs. Override for WordPress deployment. */
 export let moduleOverlayBasePath = './assets/modules';
 
+export const RESERVED_AREA_MODULE_ID = 'reserved-area';
+
 export const MODULE_LIBRARY = [
+  {
+    id: RESERVED_AREA_MODULE_ID,
+    name: 'Reserved Area',
+    category: 'Utility',
+    pitch: 2.54,     // dummy – anyPitch:true overrides filtering
+    anyPitch: true,  // visible for all grid pitches
+    widthPins: 4,    // default, overridden per-instance
+    heightPins: 4,
+    pinRows: [],     // no through-hole pins
+    resizable: true,
+    color: '#e05050',
+    outline: { width: 0, height: 0 }, // not used – computed from instance widthPins/heightPins
+  },
   {
     id: 'esp32-devkit-30pin',
     name: 'ESP32 DevKit (30-pin)',
