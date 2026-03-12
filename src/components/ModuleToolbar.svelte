@@ -1,5 +1,5 @@
 <script>
-  import { MODULE_LIBRARY } from '../lib/modules.js';
+  import { MODULE_LIBRARY, RESERVED_AREA_MODULE_ID } from '../lib/modules.js';
   import { ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, VARIABLE_SUBGRID_PAD_SHAPES, cycleVariableSubgridPitch, cycleVariableSubgridPadShape, isAdapterCompatibleWithPitch, getVariableSubgridPitches } from '../lib/adapters.js';
   import { customAdapters } from '../lib/customAdapters.svelte.js';
   import { getPitchProfile } from '../lib/gridProfiles.js';
@@ -11,7 +11,8 @@
 
   // ── Module filtering ──
   let moduleCategories = $derived.by(() => {
-    const matching = MODULE_LIBRARY.filter(m => m.pitch === config.pitch);
+// anyPitch modules (reserved area) are shown as a dedicated first option, not in optgroups
+    const matching = MODULE_LIBRARY.filter(m => !m.anyPitch && m.pitch === config.pitch);
     const cats = {};
     for (const m of matching) {
       (cats[m.category] ??= []).push(m);
@@ -44,7 +45,7 @@
 
     if (selectedModuleId) {
       const def = MODULE_LIBRARY.find(m => m.id === selectedModuleId);
-      if (def && def.pitch !== config.pitch) selectedModuleId = '';
+      if (def && !def.anyPitch && def.pitch !== config.pitch) selectedModuleId = '';
     }
     if (selectedAdapterId) {
       const def = ADAPTER_LIBRARY.find(a => a.id === selectedAdapterId)
@@ -56,7 +57,7 @@
   // Remove placed items that don't match the new pitch
   $effect(() => {
     const pitch = config.pitch;
-    const validModIds = new Set(MODULE_LIBRARY.filter(m => m.pitch === pitch).map(m => m.id));
+    const validModIds = new Set(MODULE_LIBRARY.filter(m => m.anyPitch || m.pitch === pitch).map(m => m.id));
     const filteredMods = modules.filter(m => validModIds.has(m.moduleId));
     if (filteredMods.length !== modules.length) modules = filteredMods;
 
@@ -99,14 +100,17 @@ function addModule() {
   const def = MODULE_LIBRARY.find(m => m.id === selectedModuleId);
   if (!def) return;
   const { cols, rows } = getGridSize();
+  const initW = def.resizable ? 4 : def.widthPins;
+  const initH = def.resizable ? 4 : def.heightPins;
   modules = [...modules, {
     id: crypto.randomUUID(),
     moduleId: selectedModuleId,
     name: def.name,
-      col: Math.max(0, Math.floor((cols - def.widthPins) / 2)),
-      row: Math.max(0, Math.floor((rows - def.heightPins) / 2)),
-      rotation: 0,
+    col: Math.max(0, Math.floor((cols - initW) / 2)),
+    row: Math.max(0, Math.floor((rows - initH) / 2)),
+    rotation: 0,
     color: def.color,
+    ...(def.resizable ? { widthPins: initW, heightPins: initH } : {}),
   }];
 }
 
@@ -342,6 +346,7 @@ function addModule() {
     <button class="add-btn module-accent" onclick={addModule} disabled={!selectedModuleId} title="Place module">+</button>
     <select class="item-select module-accent" bind:value={selectedModuleId}>
       <option value="">Module...</option>
+      <option value={RESERVED_AREA_MODULE_ID}>⬜ Reserved Area</option>
       {#each Object.entries(moduleCategories) as [cat, mods]}
         <optgroup label={cat}>
           {#each mods as mod}

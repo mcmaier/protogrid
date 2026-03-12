@@ -1,6 +1,6 @@
 <script>
   import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, generateSilkLineSegments, getTraceWidth, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
-  import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY } from '../lib/modules.js';
+  import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY, RESERVED_AREA_MODULE_ID } from '../lib/modules.js';
   import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch, cycleVariableSubgridPadShape } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
@@ -12,17 +12,16 @@
 
   const minZoomLevel = 0.8;
 
-  let trackDrawMode = $derived(signalTrackDrawMode);
-  let silkDrawMode = $derived(silkLineDrawMode);
-  let customSilkLines = $derived(Array.isArray(config.silkLines) ? config.silkLines : []);
-  let silkLineSegments = $derived(generateSilkLineSegments(fullConfig, resolvedAdapters));
-
   // Resolve adapter definitions with rotation applied
   let resolvedAdapters = $derived(adapters.map(inst => ({
     ...inst,
     _adapterDef: getAdapterForInstance(inst),
   })));
 
+  let trackDrawMode = $derived(signalTrackDrawMode);
+  let silkDrawMode = $derived(silkLineDrawMode);
+  let customSilkLines = $derived(Array.isArray(config.silkLines) ? config.silkLines : []);
+  let silkLineSegments = $derived(generateSilkLineSegments(fullConfig, resolvedAdapters));
   let pads = $derived(generatePadPositions(fullConfig, resolvedAdapters));
   let traces = $derived(generatePowerRailTraces(fullConfig, resolvedAdapters));
   let signalTraces = $derived(generateSignalTraces(fullConfig, resolvedAdapters));
@@ -256,7 +255,13 @@
     }
   }
 
-  let resizing = $state(null); // { instanceId, corner, startCol, startRow, startWidthPins, startHeightPins, anchorCol, anchorRow, anchorX, anchorY, startX, startY }
+    let selectedReservedArea = $derived(
+    selectedInstanceId !== null
+      ? (modules.find(m => m.id === selectedInstanceId && m.moduleId === RESERVED_AREA_MODULE_ID) ?? null)
+      : null
+  );
+
+  let resizing = $state(null); // { instanceId, kind: 'adapter'|'module', corner, startCol, startRow, startWidthPins, startHeightPins, anchorCol, anchorRow, anchorX, anchorY, startX, startY }
 
   function getAdapterMinColAndRow(anchorCol, anchorRow, widthPins, heightPins, anchorX, anchorY) {
     const col = anchorX === 'left'
@@ -268,7 +273,7 @@
     return { col, row };
   }
 
-  function onResizeHandlePointerDown(e, inst, corner) {
+  function onResizeHandlePointerDown(e, inst, corner, kind = 'adapter') {
     if (trackDrawMode) return;
     e.preventDefault();
     e.stopPropagation();
@@ -286,6 +291,7 @@
 
     resizing = {
       instanceId: inst.id,
+      kind,
       corner,
       startCol: inst.col,
       startRow: inst.row,
@@ -346,11 +352,19 @@
       heightPins = Math.max(1, maxHeight - row);
     }
 
-    adapters = adapters.map(a =>
-      a.id === resizing.instanceId
-        ? { ...a, col, row, widthPins, heightPins }
-        : a
-    );
+    if (resizing.kind === 'module') {
+      modules = modules.map(m =>
+        m.id === resizing.instanceId
+          ? { ...m, col, row, widthPins, heightPins }
+          : m
+      );
+    } else {
+      adapters = adapters.map(a =>
+        a.id === resizing.instanceId
+          ? { ...a, col, row, widthPins, heightPins }
+          : a
+      );
+    }
   }
 
   function onResizePointerUp() {
@@ -362,6 +376,12 @@
 
   function getResizeCursor(corner) {
     return corner === 'top-left' || corner === 'bottom-right' ? 'nwse-resize' : 'nesw-resize';
+  }
+
+    /** Returns an array of x-offsets for diagonal hatch lines covering a rect of size w×h at given step. */
+  function hatchOffsets(w, h, step) {
+    const count = Math.ceil((w + h) / step) + 2;
+    return Array.from({ length: count }, (_, i) => i * step - h);
   }
 
 
@@ -1265,6 +1285,51 @@
 
   <!-- Module overlays -->
   {#each sortedModules as inst (inst.id)}
+    {#if inst.moduleId === RESERVED_AREA_MODULE_ID}
+      <!-- Reserved Area: draggable + resizable keepout placeholder -->
+      {@const pitch = config.pitch}
+      {@const rx = grid.gridLeft + (inst.col || 0) * pitch}
+      {@const ry = grid.gridBottom + (inst.row || 0) * pitch}
+      {@const rw = ((inst.widthPins || 4) - 1) * pitch}
+      {@const rh = ((inst.heightPins || 4) - 1) * pitch}
+      {@const isSelected = selectedInstanceId === inst.id}
+      {@const clipId = 'rclip-' + inst.id}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <g class="module-overlay"
+        class:dragging={dragging?.instanceId === inst.id}
+        onpointerdown={(e) => onItemPointerDown(e, inst, 'module')}
+        style="cursor: grab;">
+        <defs>
+          <clipPath id={clipId}>
+            <rect x={rx} y={ry} width={rw} height={rh} />
+          </clipPath>
+        </defs>
+        <!-- Fill -->
+        <rect x={rx} y={ry} width={rw} height={rh}
+          fill={inst.color} fill-opacity="0.08"
+          stroke={inst.color} stroke-width="0.25" stroke-dasharray="1 0.5" rx="0.3" />
+        <!-- Diagonal hatching -->
+        <g clip-path={'url(#' + clipId + ')'}>
+          {#each hatchOffsets(rw, rh, pitch) as offset}
+            <line x1={rx + offset} y1={ry} x2={rx + offset + rh} y2={ry + rh}
+              stroke={inst.color} stroke-width="0.18" stroke-opacity="0.35" />
+          {/each}
+        </g>
+        <!-- Selection highlight -->
+        {#if isSelected}
+          <rect x={rx - 0.8} y={ry - 0.8} width={rw + 1.6} height={rh + 1.6}
+            fill="none" stroke={inst.color} stroke-width="0.25" stroke-dasharray="0.6 0.3" rx="0.4" opacity="0.9" />
+        {/if}
+        <!-- Label (flipped back for readability) -->
+        <g transform="translate({rx + rw / 2},{ry + rh / 2}) scale(1,-1)">
+          <text x="0" y="0" text-anchor="middle" dominant-baseline="central"
+            fill={inst.color} fill-opacity="0.75"
+            font-size="{Math.min(2.2, rw * 0.12)}"
+            font-family="'Segoe UI', system-ui, sans-serif"
+            font-weight="600">Reserved</text>
+        </g>
+      </g>
+    {:else}
     {@const m = moduleToMm(inst)}
     {@const isSelected = selectedInstanceId === inst.id}
     {#if m}
@@ -1370,6 +1435,7 @@
         </g>
       </g>
     {/if}
+    {/if}
   {/each}
 
   <!-- Topmost interaction layer: when an adapter is selected, render its hitbox above modules -->
@@ -1411,6 +1477,34 @@
       {/if}
     {/each}
   {/if}
+
+    <!-- Reserved area resize handles (topmost layer) -->
+  {#if selectedReservedArea}
+    {@const inst = selectedReservedArea}
+    {@const pitch = config.pitch}
+    {@const rx = grid.gridLeft + (inst.col || 0) * pitch}
+    {@const ry = grid.gridBottom + (inst.row || 0) * pitch}
+    {@const rw = ((inst.widthPins || 4) - 1) * pitch}
+    {@const rh = ((inst.heightPins || 4) - 1) * pitch}
+    {#each [
+      { key: 'bottom-left',  cx: rx,      cy: ry      },
+      { key: 'bottom-right', cx: rx + rw, cy: ry      },
+      { key: 'top-left',     cx: rx,      cy: ry + rh },
+      { key: 'top-right',    cx: rx + rw, cy: ry + rh },
+    ] as corner}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <circle
+        cx={corner.cx}
+        cy={corner.cy}
+        r="0.55"
+        fill="#f9e2af"
+        stroke="#1a1a1a"
+        stroke-width="0.18"
+        onpointerdown={(e) => onResizeHandlePointerDown(e, inst, corner.key, 'module')}
+        style="cursor: {getResizeCursor(corner.key)};"
+      />
+    {/each}
+  {/if}
   </g>
 </svg>
 
@@ -1428,7 +1522,7 @@
 <style>
   .preview-container {
     position: relative;
-    max-height: 82dvh;
+    max-height: 80dvh;
     overflow: hidden;
   }
 
