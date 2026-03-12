@@ -1,6 +1,7 @@
 <script>
   import { MODULE_LIBRARY } from '../lib/modules.js';
   import { ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, VARIABLE_SUBGRID_PAD_SHAPES, cycleVariableSubgridPitch, cycleVariableSubgridPadShape, isAdapterCompatibleWithPitch, getVariableSubgridPitches } from '../lib/adapters.js';
+  import { customAdapters } from '../lib/customAdapters.svelte.js';
   import { getPitchProfile } from '../lib/gridProfiles.js';
 
   let { modules = $bindable(), adapters = $bindable(), config, selectedInstanceId, onSelect, showModuleOverlays = $bindable(), showAdapterOverlays = $bindable() } = $props();
@@ -20,8 +21,10 @@
 
   // ── Adapter filtering ──
   let adapterCategories = $derived.by(() => {
-    const matching = ADAPTER_LIBRARY.filter(a => isAdapterCompatibleWithPitch(a, config.pitch));    
-    const cats = {};
+    // Custom adapters always go first under "Custom", regardless of their own category field
+    const matchingCustom = customAdapters.list.filter(a => isAdapterCompatibleWithPitch(a, config.pitch));
+    const cats = matchingCustom.length > 0 ? { 'Custom': matchingCustom } : {};
+    const matching = ADAPTER_LIBRARY.filter(a => isAdapterCompatibleWithPitch(a, config.pitch));
     for (const a of matching) {
       (cats[a.category] ??= []).push(a);
     }
@@ -44,7 +47,8 @@
       if (def && def.pitch !== config.pitch) selectedModuleId = '';
     }
     if (selectedAdapterId) {
-      const def = ADAPTER_LIBRARY.find(a => a.id === selectedAdapterId);
+      const def = ADAPTER_LIBRARY.find(a => a.id === selectedAdapterId)
+        ?? customAdapters.list.find(a => a.id === selectedAdapterId);
       if (!def || !isAdapterCompatibleWithPitch(def, config.pitch)) selectedAdapterId = '';
     }
   });
@@ -56,7 +60,8 @@
     const filteredMods = modules.filter(m => validModIds.has(m.moduleId));
     if (filteredMods.length !== modules.length) modules = filteredMods;
 
-    const validAdpIds = new Set(ADAPTER_LIBRARY.filter(a => isAdapterCompatibleWithPitch(a, pitch)).map(a => a.id));
+    const allAdpDefs = [...ADAPTER_LIBRARY, ...customAdapters.list];
+    const validAdpIds = new Set(allAdpDefs.filter(a => isAdapterCompatibleWithPitch(a, pitch)).map(a => a.id));
     const filteredAdp = adapters
       .filter(a => validAdpIds.has(a.adapterId))
       .map(a => {
@@ -121,7 +126,8 @@ function addModule() {
   // ── Adapter actions ──
   function addAdapter() {
     if (!selectedAdapterId) return;
-    const def = ADAPTER_LIBRARY.find(a => a.id === selectedAdapterId);
+    const def = ADAPTER_LIBRARY.find(a => a.id === selectedAdapterId)
+      ?? customAdapters.list.find(a => a.id === selectedAdapterId);
     if (!def) return;
     const { cols, rows } = getGridSize();
     const isVariableSubGrid = def.id === VARIABLE_SUBGRID_ADAPTER_ID;
@@ -182,7 +188,8 @@ function addModule() {
   }
 
   function adapterHasOptionalFeatures(adapterId) {
-    const def = ADAPTER_LIBRARY.find(a => a.id === adapterId);
+    const def = ADAPTER_LIBRARY.find(a => a.id === adapterId)
+      ?? customAdapters.list.find(a => a.id === adapterId);
     const opt = /** @type {any} */ (def)?.optionalFeatures;
     return opt && Object.values(opt).some(arr => Array.isArray(arr) && arr.length > 0);
   }
@@ -242,9 +249,55 @@ function addModule() {
       ? (selectedAdapter?.subPadShape === 'circle' ? '●' : selectedAdapter?.subPadShape === 'square-smd' ? '■' : '◙')
       : '⊕'
   );
+
+  // ── Custom adapter upload ──
+  let fileInput = $state(null);
+
+  function validateAdapterJson(data) {
+    const items = Array.isArray(data) ? data : [data];
+    for (const item of items) {
+      if (typeof item.id !== 'string' || !item.id) return 'Missing or invalid "id"';
+      if (typeof item.name !== 'string' || !item.name) return 'Missing or invalid "name"';
+      if (typeof item.category !== 'string') return 'Missing "category"';
+      if (typeof item.pitch !== 'number') return `"pitch" must be a number (got ${typeof item.pitch})`;
+      if (!Array.isArray(item.throughPins)) return 'Missing "throughPins" array';
+      if (!item.features || typeof item.features !== 'object') return 'Missing "features" object';
+      if (!Array.isArray(item.features.copper)) return 'Missing "features.copper" array';
+      if (!item.outline || typeof item.outline.width !== 'number' || typeof item.outline.height !== 'number')
+        return 'Missing or invalid "outline" ({width, height})';
+      if (typeof item.widthPins !== 'number') return 'Missing "widthPins"';
+      if (typeof item.heightPins !== 'number') return 'Missing "heightPins"';
+    }
+    return null;
+  }
+
+  function handleAdapterFileUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      let data;
+      try {
+        data = JSON.parse(/** @type {string} */ (ev.target.result));
+      } catch {
+        alert(`Invalid JSON: ${file.name}`);
+        return;
+      }
+      const error = validateAdapterJson(data);
+      if (error) {
+        alert(`Adapter JSON validation failed:\n${error}`);
+        return;
+      }
+      customAdapters.add(data);
+    };
+    reader.readAsText(file);
+  }
 </script>
 
 <div class="toolbar">
+  <div class="add-rows-wrap">
+  <div class="add-rows-col">
   <!-- Adapter row -->
   <div class="add-row">
     <span class="row-icon" title="SMD Adapters — included in Gerber export">⚡</span>
@@ -261,9 +314,9 @@ function addModule() {
     <select class="item-select adapter-accent" bind:value={selectedAdapterId}>
       <option value="">Adapter...</option>
       {#each Object.entries(adapterCategories) as [cat, adps]}
-        <optgroup label={cat}>
+        <optgroup label={cat === 'Custom' ? '★ Custom' : cat}>
           {#each adps as adp}
-            <option value={adp.id}>{adp.name}</option>
+            <option value={adp.id}>{cat === 'Custom' ? `★ ${adp.name}` : adp.name}</option>
           {/each}
         </optgroup>
       {/each}
@@ -299,7 +352,19 @@ function addModule() {
       {#if Object.keys(moduleCategories).length === 0}
         <option value="" disabled>No modules ({config.pitch}mm)</option>
       {/if}
-    </select>    
+    </select>
+  </div>
+  </div><!-- end add-rows-col -->
+
+  <!-- Upload custom adapter -->
+  <button class="upload-btn" onclick={() => fileInput.click()} title="Import custom adapter JSON">
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
+      <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/>
+    </svg>
+  </button>
+  <input bind:this={fileInput} type="file" accept=".json" style="display:none" onchange={handleAdapterFileUpload} />
+
   </div>
 
   <!-- Placed items with permanent action buttons -->
@@ -367,6 +432,37 @@ function addModule() {
     font-family: 'Segoe UI', system-ui, sans-serif;
     font-size: 12px;
   }
+
+  .add-rows-wrap {
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    align-items: stretch;
+  }
+
+  .add-rows-wrap > .add-rows-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .upload-btn {
+    width: 28px;
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    color: #cdd6f4;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition: background 0.1s, opacity 0.1s;
+  }
+  .upload-btn:hover { background: #313244; opacity: 1; border-color: #6c7086; }
 
   .add-row {
     display: flex;

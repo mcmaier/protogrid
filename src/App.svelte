@@ -4,8 +4,9 @@
   import ModuleToolbar from './components/ModuleToolbar.svelte';
   import { generateAllFiles } from './lib/gerber.js';
   import { downloadAsZip } from './lib/zip.js';
-  import { getAdapterForInstance } from './lib/adapters.js';
+  import { getAdapterForInstance, registerCustomAdapters } from './lib/adapters.js';
   import { parseProject, serializeProject } from './lib/projectFile.js';
+  import { customAdapters } from './lib/customAdapters.svelte.js';
   import { applyPitchProfile } from './lib/gridProfiles.js';
 
   const defaultConfig = applyPitchProfile({
@@ -46,10 +47,14 @@
   let selectedSilkLineIndex = $state(null);
   let pendingPitch = $state(defaultConfig.pitch);
 
-  let resolvedAdapters = $derived(adapters.map(inst => ({
-    ...inst,
-    _adapterDef: getAdapterForInstance(inst),
-  })));
+  // Keep plain-JS adapter lookup in sync with the reactive custom list
+  $effect(() => { registerCustomAdapters(customAdapters.list); });
+
+  // Reference customAdapters.list so this re-derives when the custom library changes
+  let resolvedAdapters = $derived(adapters.map(inst => {
+    void customAdapters.list; // reactive dependency
+    return { ...inst, _adapterDef: getAdapterForInstance(inst) };
+  }));
 
   function onSelect(id) {
     selectedInstanceId = id;
@@ -77,7 +82,7 @@
   }
 
   function handleSaveProject() {
-    const json = serializeProject({ config, modules, adapters });
+    const json = serializeProject({ config, modules, adapters, customAdapterDefs: customAdapters.list });
     const filename = `MacGizmoGrid-${config.width}x${config.height}.gridgen.json`;
     downloadTextFile(json, filename);
   }
@@ -89,8 +94,12 @@
       const text = await file.text();
       const imported = parseProject(text, defaultConfig);
 
+      if (imported.customAdapterDefs.length > 0) {
+        customAdapters.add(imported.customAdapterDefs);
+        registerCustomAdapters(customAdapters.list); // sync update before adapters are set
+      }
       config = imported.config;
-      pendingPitch = imported.config.pitch;      
+      pendingPitch = imported.config.pitch;
       modules = imported.modules;
       adapters = imported.adapters;
       selectedInstanceId = null;

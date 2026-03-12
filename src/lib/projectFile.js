@@ -87,16 +87,24 @@ function sanitizePlacedItems(rawItems, key) {
     }));
 }
 
-export function buildProjectData({ config, modules, adapters }) {
+/**
+ * @param {{ config: any, modules: any[], adapters: any[], customAdapterDefs?: any[] }} state
+ */
+export function buildProjectData({ config, modules, adapters, customAdapterDefs = [] }) {
+  // Only embed definitions actually referenced by placed adapters
+  const placedIds = new Set(adapters.map(a => a.adapterId));
+  const usedCustomDefs = customAdapterDefs.filter(def => placedIds.has(def.id));
+
   return {
     type: PROJECT_FILE_TYPE,
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    toolVersion: SOFTWARE_VERSION,  
+    toolVersion: SOFTWARE_VERSION,
     savedAt: new Date().toISOString(),
     data: {
       config,
       modules,
       adapters,
+      ...(usedCustomDefs.length > 0 ? { customAdapterDefs: usedCustomDefs } : {}),
     },
   };
 }
@@ -115,12 +123,16 @@ export function parseProject(jsonText, defaults) {
   const schemaVersion = toNumber(parsed.schemaVersion, 1);
   const isFutureVersion = schemaVersion > CURRENT_SCHEMA_VERSION;
 
+  const rawCustomDefs = parsed.data.customAdapterDefs;
+  const customAdapterDefs = Array.isArray(rawCustomDefs) ? rawCustomDefs : [];
+
   return {
     schemaVersion,
     isFutureVersion,
     config: sanitizeConfig(parsed.data.config, defaults),
     modules: sanitizePlacedItems(parsed.data.modules, 'moduleId'),
     adapters: sanitizePlacedItems(parsed.data.adapters, 'adapterId'),
+    customAdapterDefs,
   };
 }
 

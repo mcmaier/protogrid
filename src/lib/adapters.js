@@ -45,6 +45,23 @@ export let adapterOverlayBasePath = './assets/adapters';
 export const VARIABLE_SUBGRID_ADAPTER_ID = 'subgrid-variable';
 export const VARIABLE_SUBGRID_PAD_SHAPES = ['circle', 'square', 'square-smd'];
 
+/** Runtime-registered custom adapters (updated via registerCustomAdapters). */
+let _customAdapters = [];
+
+/**
+ * Called by App.svelte whenever the customAdaptersList store changes.
+ * Keeps the plain-JS lookup functions in sync without requiring Svelte runes here.
+ * @param {any[]} list
+ */
+export function registerCustomAdapters(list) {
+  _customAdapters = list;
+}
+
+/** Returns all built-in + custom adapters combined. */
+export function getAllAdapters() {
+  return [...ADAPTER_LIBRARY, ..._customAdapters];
+}
+
 
 /** Basic adapters only - other footprints are separate JSON files in assets/adapters */
 
@@ -520,7 +537,7 @@ export function cycleVariableSubgridPadShape(inst) {
  * Rotation center = middle of the widthPins × heightPins grid rectangle.
  */
 export function getRotatedAdapter(adapterId, rotation = 0) {
-  const adapter = ADAPTER_LIBRARY.find(a => a.id === adapterId);
+  const adapter = getAllAdapters().find(a => a.id === adapterId);
   if (!adapter) return null;
 
   const r = ((rotation % 4) + 4) % 4;
