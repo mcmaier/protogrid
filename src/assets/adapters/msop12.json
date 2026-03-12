@@ -19,7 +19,7 @@
     { "col": 4, "row": 2, "label": "10" },
     { "col": 4, "row": 3, "label": "11" },
     { "col": 3, "row": 3, "label": "12" }
-  ],
+  ],  
 
   "features": {
     "copper": [

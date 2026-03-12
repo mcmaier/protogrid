@@ -744,7 +744,7 @@ function AdapterEditor() {
           setShowJsonSelect(true);
         }
       } catch (err) {
-        alert('Fehler beim Laden der JSON-Datei: ' + err.message);
+        alert('Error loading JSON file: ' + err.message);
       }
     };
     reader.readAsText(file);
@@ -1075,7 +1075,7 @@ function AdapterEditor() {
         React.createElement("button", {
           onClick: () => jsonFileInputRef.current?.click(),
           style: { ...btnStyle, padding: "6px 8px", fontSize: 11, border: `1px solid ${COLORS.panelBorder}`, width: "100%" },
-        }, "📂 JSON öffnen / bearbeiten"),
+        }, "📂 Open/Edit JSON file"),
 
         // Export
         React.createElement("div", { style: { display: "flex", gap: 4 } },
@@ -1098,7 +1098,7 @@ function AdapterEditor() {
           React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "SILK LABEL"),
           React.createElement("label", { style: { fontSize: 10, display: "flex", gap: 4, alignItems: "center", cursor: "pointer", marginBottom: 6 } },
             React.createElement("input", { type: "checkbox", checked: adapter.silkLabel?.show || false, onChange: e => setAdapter(a => ({ ...a, silkLabel: { ...(a.silkLabel || DEFAULT_ADAPTER.silkLabel), show: e.target.checked } })) }),
-            "Anzeigen (Name als Text)"
+            "Show (Name as text)"
           ),
           adapter.silkLabel?.show && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "32px 1fr", gap: 4, alignItems: "center" } },
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "X"),
@@ -1529,7 +1529,7 @@ function AdapterEditor() {
             React.createElement("button", { onClick: () => setShowJsonSelect(false), style: { ...btnStyle, padding: "2px 8px" } }, "✕"),
           ),
           React.createElement("div", { style: { fontSize: 10, color: COLORS.textDim } },
-            `${jsonSelectOptions.length} Adapter in der Datei – bitte einen auswählen:`
+            `${jsonSelectOptions.length} adapters found  – choose one to edit:`
           ),
           React.createElement("div", { style: { overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 } },
             jsonSelectOptions.map((opt, i) =>

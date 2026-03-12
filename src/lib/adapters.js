@@ -10,6 +10,13 @@
  *   - features: Gerber primitives relative to origin (col 0, row 0 position)
  *     - copper[]: pads and traces on copper layer
  *     - mask[]: solder mask openings
+ *     - drills[]: vias and drills, outside of the throughPin Grid
+ *     - silk[]: silkscreen outlines
+ *     - silkText[]: Pin and part Designators
+ *   - optionalFeatures: Additional Gerber primitives relative to origin (col 0, row 0 position)
+ *     - copper[]: pads and traces on copper layer
+ *     - drills[]: vias and drills, outside of the throughPin Grid
+ *     - mask[]: solder mask openings
  *     - silk[]: silkscreen outlines
  *     - silkText[]: Pin and part Designators
  *   - outline: { width, height } in mm for preview rendering
@@ -27,7 +34,7 @@
  *   { type: 'circle', x, y, d }          – circular feature
  *   { type: 'trace', x1, y1, x2, y2, w } – copper trace
  *   { type: 'poly', points: [{x,y}...] } – silkscreen polyline
- *
+ *   { type: 'text', text, x,y, height, rotation } – silkscreen text
  */
 
 
