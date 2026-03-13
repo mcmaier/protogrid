@@ -1278,7 +1278,8 @@ function AdapterEditor() {
               const candidates = [];
               for (let i = 0; i < adapter.smdPads.length; i++) {
                 const p = adapter.smdPads[i];
-                if (Math.abs(w.x - p.x) < p.w / 2 + 0.3 && Math.abs(w.y - p.y) < p.h / 2 + 0.3)
+                const tp = transformPoint(p.x, p.y);
+                if (Math.abs(w.x - tp.x) < p.w / 2 + 0.3 && Math.abs(w.y - tp.y) < p.h / 2 + 0.3)
                   candidates.push({ type: 'pad', index: i });
               }
               for (let i = 0; i < adapter.traces.length; i++) {
