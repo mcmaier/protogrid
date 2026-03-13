@@ -585,7 +585,10 @@ function AdapterEditor() {
 
   const handleKeyDown = useCallback((e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === "Escape") { setTracePoints([]); setTool("select"); setSelectedSilkLabel(false); setSelectedBottomPad(null); setSelectedBottomTrace(null); setSelectedVia(null); setSelectedSilkLine(null); setSelectedSilkText(null); }
+    if (e.key === "Escape") {
+      if (tool === "trace" && tracePoints.length > 0) { setTracePoints([]); } // abort trace drawing, stay in trace mode
+      else { setTracePoints([]); setTool("select"); setSelectedSilkLabel(false); setSelectedBottomPad(null); setSelectedBottomTrace(null); setSelectedVia(null); setSelectedSilkLine(null); setSelectedSilkText(null); }
+    }
     else if (e.key === "Enter") finishTrace();
     else if (e.key === "Delete" || e.key === "Backspace") {
       if (selectedTrace !== null) { setAdapter(a => ({ ...a, traces: a.traces.filter((_, i) => i !== selectedTrace) })); setSelectedTrace(null); }
@@ -603,11 +606,13 @@ function AdapterEditor() {
       const dy = e.key === "ArrowUp" ? step : e.key === "ArrowDown" ? -step : 0;
       setAdapter(a => ({ ...a, silkLabel: { ...a.silkLabel, x: roundTo(a.silkLabel.x + dx, 3), y: roundTo(a.silkLabel.y + dy, 3) } }));
     }
-    else if (e.key === "t") setTool(t => t === "trace" ? "select" : "trace");
+    else if (e.key === "v") { setTool("select"); setTracePoints([]); }
+    else if (e.key === "t") { setTool("trace"); setTracePoints([]); }
+    else if (e.key === "p") { setTool("edit-pins"); setTracePoints([]); }
     else if (e.key === "g") { setSnapToGrid(s => !s); setSnapSmall(false); }
     else if (e.key === "s") { setSnapSmall(s => !s); setSnapToGrid(false); }
     else if (e.key === "z" && e.ctrlKey) setAdapter(a => ({ ...a, traces: a.traces.slice(0, -1) }));
-  }, [finishTrace, selectedTrace, selectedPad, selectedBottomPad, selectedBottomTrace, selectedVia, selectedSilkLine, selectedSilkText, selectedSilkLabel]);
+  }, [finishTrace, tool, tracePoints, selectedTrace, selectedPad, selectedBottomPad, selectedBottomTrace, selectedVia, selectedSilkLine, selectedSilkText, selectedSilkLabel]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -913,7 +918,7 @@ function AdapterEditor() {
     React.createElement("div", { style: { display: "flex", height: "100vh", background: COLORS.bg, color: COLORS.text, fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace", fontSize: 12 } },
 
       // Left Panel
-      React.createElement("div", { style: { width: 280, borderRight: `1px solid ${COLORS.panelBorder}`, background: COLORS.panelBg, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 } },
+      React.createElement("div", { style: { width: 290, borderRight: `1px solid ${COLORS.panelBorder}`, background: COLORS.panelBg, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 } },
         React.createElement("h2", { style: { margin: 0, fontSize: 14, color: COLORS.accent, letterSpacing: 1 } }, "⚡ ADAPTER EDITOR"),
 
         // Adapter config
@@ -1014,9 +1019,9 @@ function AdapterEditor() {
         React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
           React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "TOOLS"),
           React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
-            React.createElement("button", { onClick: () => { setTool("select"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "select" ? COLORS.accent : COLORS.btnBg } }, "Select"),
+            React.createElement("button", { onClick: () => { setTool("select"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "select" ? COLORS.accent : COLORS.btnBg } }, "Select (V)"),
             React.createElement("button", { onClick: () => { setTool("trace"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "trace" ? COLORS.accent : COLORS.btnBg } }, "Trace (T)"),
-            React.createElement("button", { onClick: () => { setTool("edit-pins"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "edit-pins" ? "#e09020" : COLORS.btnBg } }, "Edit Pins"),
+            React.createElement("button", { onClick: () => { setTool("edit-pins"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "edit-pins" ? "#e09020" : COLORS.btnBg } }, "Edit Pins (P)"),
           ),
           tool === "trace" && React.createElement("div", { style: { marginTop: 6 } },
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Width: "),
