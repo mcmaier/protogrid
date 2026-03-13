@@ -124,6 +124,62 @@
     onLoadProject?.(file);
     event.target.value = '';
   }
+
+  async function inlineImages(svgElement) {
+  const images = svgElement.querySelectorAll('image');
+  await Promise.all([...images].map(async img => {
+    const url = img.getAttribute('href') || img.getAttribute('xlink:href');
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const base64 = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+    img.setAttribute('href', base64);
+  }));
+}
+
+  async function onExportImage() {
+    const scale = 12;
+    const labelPad = 3;
+    const fullW = config.width + labelPad * 2;
+    const fullH = config.height + labelPad * 2;
+
+    const svg = /** @type {SVGSVGElement} */ (document.querySelector('.pcb-preview').cloneNode(true));
+
+    // Override viewBox to the full board extent (ignoring current pan/zoom)
+    svg.setAttribute('viewBox', `${-labelPad} ${-labelPad} ${fullW} ${fullH}`);
+    // Set explicit dimensions so the browser knows the intrinsic size
+    svg.setAttribute('width', String(fullW * scale));
+    svg.setAttribute('height', String(fullH * scale));
+
+    await inlineImages(svg);
+
+    const xml = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob([xml], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = fullW * scale;
+      canvas.height = fullH * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+
+      canvas.toBlob(b => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b);
+        a.download = `GridGen-${config.width}x${config.height}.png`;
+        a.click();
+      }, 'image/png');
+    };
+    img.src = url;
+  }
+
+
   const LABEL_STEPS = [0, 1, 2, 5]; // off → every → every 2nd → every 5th
 
   function cycleLabelStep(which) {
@@ -302,6 +358,12 @@
         </svg> Load
         <input type="file" accept=".json,.gridgen.json,application/json" onchange={handleProjectFileChange} />
       </label>
+      <button class="secondary-btn" onclick={onExportImage}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-camera" viewBox="0 0 16 16">
+          <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4z"/>
+          <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5m0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0"/>
+        </svg> Image
+      </button>
     </div>
 
     <button class="export-btn" onclick={onExport}>
@@ -454,7 +516,8 @@
   }
 
   .project-actions {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 8px;
     margin-top: 4px;
   }
