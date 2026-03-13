@@ -2,6 +2,11 @@
   {
   "id": "term_508_M_254",
   "name": "Terminal 5.08 (Mid)",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },  
   "category": "Terminals",
   "pitch": 2.54,
   "color": "#a060c0",
@@ -40,6 +45,11 @@
 {
   "id": "term_508_L_254",
   "name": "Terminal 5.08 (Left)",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "Terminals",
   "pitch": 2.54,
   "color": "#a060c0",
@@ -80,6 +90,11 @@
 {
   "id": "term_508_R_254",
   "name": "Terminal 5.08 (Right)",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "Terminals",
   "pitch": 2.54,
   "color": "#a060c0",

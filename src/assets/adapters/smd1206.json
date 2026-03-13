@@ -1,6 +1,11 @@
 {
   "id": "smd1206",
   "name": "R,L,C 1206 (1x4)",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "Passive",
   "pitch": 2.54,
   "color": "#c08060",

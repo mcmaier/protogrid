@@ -1,6 +1,11 @@
   {
   "id": "sc70-3",
   "name": "SC-70-3",
+    "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "SOT",
   "pitch": 2.54,
   "color": "#e0a030",

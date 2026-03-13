@@ -1,6 +1,11 @@
 {
   "id": "tssop8",
   "name": "TSSOP-8",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },  
   "category": "TSSOP",
   "pitch": 2.54,
   "color": "#60a0c0",

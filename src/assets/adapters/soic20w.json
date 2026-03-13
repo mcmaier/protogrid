@@ -1,6 +1,11 @@
 {
   "id": "soic20w",
   "name": "SOIC-16/18/20W",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },  
   "category": "SOIC",
   "pitch": 2.54,
   "color": "#a060c0",

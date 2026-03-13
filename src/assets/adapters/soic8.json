@@ -2,6 +2,11 @@
   {
   "id": "soic8",
   "name": "SOIC-8",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "SOIC",
   "pitch": 2.54,
   "color": "#a060c0",
@@ -70,6 +75,11 @@
 {
   "id": "soic8_2mm",
   "name": "SOIC-8",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "SOIC",
   "pitch": 2,
   "color": "#a060c0",

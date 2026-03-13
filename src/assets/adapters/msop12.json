@@ -2,6 +2,11 @@
   {
   "id": "msop12",
   "name": "MSOP-8..12",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "MSOP",
   "pitch": 2.54,
   "color": "#60c0a0",
@@ -122,6 +127,11 @@
 {
   "id": "msop12_2mm",
   "name": "MSOP8..12",
+    "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "MSOP",
   "pitch": 2,
   "color": "#60c0a0",

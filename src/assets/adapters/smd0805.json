@@ -1,6 +1,11 @@
 {
   "id": "smd0805",
-  "name": "R,L,C 0603/0805 (1\u00d73)",
+  "name": "R,L,C 0603/0805 (1x3)",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "Passive",
   "pitch": 2.54,
   "color": "#c08060",

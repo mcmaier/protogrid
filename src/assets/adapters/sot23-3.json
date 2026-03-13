@@ -2,6 +2,11 @@
   {
   "id": "sot23-3",
   "name": "SOT-23-3",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },  
   "category": "SOT",
   "pitch": 2.54,
   "color": "#e0a030",
@@ -44,6 +49,11 @@
 {
   "id": "sot23-3_2mm",
   "name": "SOT-23-3",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
   "category": "SOT",
   "pitch": 2,
   "color": "#a060c0",

@@ -70,6 +70,16 @@ This project was built using Svelte + Vite
 
 [VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
 
-### Need an official Svelte framework?
 
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+## Licenses
+
+**GridGen:** [AGPL-3.0](LICENSE)
+
+**Adapter Editor:** [MIT License](adapter-editor/LICENSE)
+
+**Adapters:**
+Some adapters are based on the [KiCad Libraries](https://gitlab.com/kicad/libraries/kicad-footprints),
+which are licensed under CC-BY-SA 4.0. Derived adapters are marked with
+`"source": "Based on KiCad Libraries"` in their `meta` field.
+
+
