@@ -398,7 +398,7 @@ function addModule() {
       <div class="placed-items">
         {#each adapters as inst (inst.id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="chip adapter-chip" class:selected={selectedInstanceId === inst.id}
+          <div class="chip adapter-chip" style="border-left-color: {inst.color ?? '#f9e2af'}" class:selected={selectedInstanceId === inst.id}
             onclick={() => onSelect(selectedInstanceId === inst.id ? null : inst.id)}
             onkeydown={(e) => { if (e.key === 'Enter') onSelect(selectedInstanceId === inst.id ? null : inst.id); }}
             role="button" tabindex="0">
@@ -412,7 +412,7 @@ function addModule() {
         {/each}
         {#each modules as inst (inst.id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="chip module-chip" class:selected={selectedInstanceId === inst.id}
+          <div class="chip module-chip" style="border-left-color: {inst.color ?? '#89b4fa'}" class:selected={selectedInstanceId === inst.id}
             onclick={() => onSelect(selectedInstanceId === inst.id ? null : inst.id)}
             onkeydown={(e) => { if (e.key === 'Enter') onSelect(selectedInstanceId === inst.id ? null : inst.id); }}
             role="button" tabindex="0">

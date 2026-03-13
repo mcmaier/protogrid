@@ -1295,7 +1295,11 @@
 
     {#if inst.moduleId === RESERVED_AREA_MODULE_ID}
       <!-- Reserved Area: draggable + resizable keepout placeholder -->
-
+      {@const hp = pitch / 2}
+      {@const ox = rx - hp}
+      {@const oy = ry - hp}
+      {@const ow = rw + pitch}
+      {@const oh = rh + pitch}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <g class="module-overlay"
         class:dragging={dragging?.instanceId === inst.id}
@@ -1303,30 +1307,30 @@
         style="cursor: {showModuleOverlays ? 'grab' : 'default'}; pointer-events: {showModuleOverlays ? 'auto' : 'none'};">
         <defs>
           <clipPath id={clipId}>
-            <rect x={rx} y={ry} width={rw} height={rh} />
+            <rect x={ox} y={oy} width={ow} height={oh} />
           </clipPath>
         </defs>
         <!-- Fill -->
-        <rect x={rx} y={ry} width={rw} height={rh}
+        <rect x={ox} y={oy} width={ow} height={oh}
           fill={inst.color} fill-opacity="0.08"
           stroke={inst.color} stroke-width="0.25" stroke-dasharray={showModuleOverlays ? "" : "1 0.5"} rx="0.3" />
         <!-- Diagonal hatching -->
         <g clip-path={'url(#' + clipId + ')'}>
-          {#each hatchOffsets(rw, rh, pitch) as offset}
-            <line x1={rx + offset} y1={ry} x2={rx + offset + rh} y2={ry + rh}
+          {#each hatchOffsets(ow, oh, pitch) as offset}
+            <line x1={ox + offset} y1={oy} x2={ox + offset + oh} y2={oy + oh}
               stroke={inst.color} stroke-width="0.18" stroke-opacity="0.35" />
           {/each}
         </g>
         <!-- Selection highlight -->
         {#if isSelected}
-          <rect x={rx - 0.8} y={ry - 0.8} width={rw + 1.6} height={rh + 1.6}
+          <rect x={ox - 0.8} y={oy - 0.8} width={ow + 1.6} height={oh + 1.6}
             fill="none" stroke={inst.color} stroke-width="0.25" stroke-dasharray="0.6 0.3" rx="0.4" opacity="0.9" />
         {/if}
         <!-- Label (flipped back for readability) -->
-        <g transform="translate({rx + rw / 2},{ry + rh / 2}) scale(1,-1)">
+        <g transform="translate({ox + ow / 2},{oy + oh / 2}) scale(1,-1)">
           <text x="0" y="0" text-anchor="middle" dominant-baseline="central"
             fill={inst.color} fill-opacity="0.75"
-            font-size="{Math.min(2.2, rw * 0.12)}"
+            font-size="{Math.min(2.2, ow * 0.12)}"
             font-family="'Segoe UI', system-ui, sans-serif"
             font-weight="600">Reserved</text>
         </g>
