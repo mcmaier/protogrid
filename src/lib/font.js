@@ -9,7 +9,9 @@
  */
 
 const GLYPHS = {
+  // Punctuation & symbols
   '.': [[[1,0],[1,1],[2,1],[2,0],[1,0]]],
+  '•': [[[0.5,1],[0.5,4],[2.5,4],[2.5,1],[0.5,1]]],   // big dot for pin markings
   '/': [[[1,0],[3,5]]],
   '-': [[[1,3],[3,3]]],
   '0': [[[0,0],[0,5],[3,5],[3,0],[0,0]], [[0,0],[3,5]]],
@@ -48,6 +50,20 @@ const GLYPHS = {
   'X': [[[0,0],[3,5]], [[0,5],[3,0]]],
   'Y': [[[0,5],[1.5,2.5],[3,5]], [[1.5,2.5],[1.5,0]]],
   'Z': [[[0,5],[3,5],[0,0],[3,0]]],
+
+  // Lowercase letters — x-height 0–3, ascenders to 5
+  // (needed for SI prefixes and component value labels)
+  'k': [[[0,0],[0,5]], [[3,3.5],[1.5,1.75],[3,0]]],
+  'm': [[[0,3],[0,0]], [[0,3],[1.5,4],[3,3],[3,0]], [[1.5,4],[1.5,0]]],
+  'n': [[[0,3],[0,0]], [[0,3],[2,3],[3,2],[3,0]]],
+  'p': [[[0,3],[0,0]], [[0,3],[2,3],[3,2],[3,1],[2,0],[0,0]]],
+  'u': [[[0,3],[0,1],[1,0],[2,0],[3,1],[3,3]]],
+
+  // Special characters for electronic component values
+  'µ': [[[0,3],[0,0]], [[0,3],[0,1],[1,0],[2,0],[3,1],[3,3]]],  // micro sign (U+00B5)
+  'μ': [[[0,3],[0,0]], [[0,3],[0,1],[1,0],[2,0],[3,1],[3,3]]],  // Greek mu (U+03BC)
+  'Ω': [[[0,0],[1,0]], [[2,0],[3,0]], [[0,0.5],[0,3.5],[1.5,5],[3,3.5],[3,0.5]]],  // Ohm (U+03A9)
+  'ω': [[[0,0],[1,0]], [[2,0],[3,0]], [[0,0.5],[0,3.5],[1.5,5],[3,3.5],[3,0.5]]],  // omega (U+03C9) alias
 };
 
 /**
@@ -75,7 +91,8 @@ export function getTextStrokes(text, x, y, height, anchor = 'left', rotation = 0
   const allStrokes = [];
 
   for (let i = 0; i < text.length; i++) {
-    const ch = text[i].toUpperCase();
+    const orig = text[i];
+    const ch = GLYPHS[orig] !== undefined ? orig : orig.toUpperCase();
     const glyph = GLYPHS[ch];
     if (!glyph) continue;
 

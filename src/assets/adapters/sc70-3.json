@@ -1,0 +1,50 @@
+  {
+  "id": "sc70-3",
+  "name": "SC-70-3",
+    "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
+  "category": "SOT",
+  "pitch": 2.54,
+  "color": "#e0a030",
+
+  "throughPins": [
+    { "col": 0, "row": 1, "label": "1" },
+    { "col": 0, "row": 0, "label": "2" },
+    { "col": 2, "row": 0, "label": "3" }
+  ],
+
+  "features": {
+    "copper": [
+      { "type": "pad", "x": 1.603, "y": 1.92, "w": 1.225, "h": 0.5 },
+      { "type": "pad", "x": 1.603, "y": 0.62, "w": 1.225, "h": 0.5 },
+      { "type": "pad", "x": 3.478, "y": 1.27, "w": 1.225, "h": 0.5 },
+
+      { "type": "trace", "x1": 1.651, "y1": 1.905, "x2": 0.889, "y2": 1.905, "w": 0.3 },
+      { "type": "trace", "x1": 0.889, "y1": 1.905, "x2": 0, "y2": 2.54, "w": 0.3 },
+      { "type": "trace", "x1": 1.651, "y1": 0.635, "x2": 0.889, "y2": 0.635, "w": 0.3 },
+      { "type": "trace", "x1": 0.889, "y1": 0.635, "x2": 0, "y2": 0, "w": 0.3 },
+      { "type": "trace", "x1": 3.429, "y1": 1.27, "x2": 4.191, "y2": 1.27, "w": 0.3 },
+      { "type": "trace", "x1": 4.191, "y1": 1.27, "x2": 4.445, "y2": 1.27, "w": 0.3 },
+      { "type": "trace", "x1": 4.445, "y1": 1.27, "x2": 5.08, "y2": 0.635, "w": 0.3 },
+      { "type": "trace", "x1": 5.08, "y1": 0.635, "x2": 5.08, "y2": 0, "w": 0.3 }
+    ],
+    "mask": [
+      { "type": "pad", "x": 1.603, "y": 1.92, "w": 1.325, "h": 0.6 },
+      { "type": "pad", "x": 1.603, "y": 0.62, "w": 1.325, "h": 0.6 },
+      { "type": "pad", "x": 3.478, "y": 1.27, "w": 1.325, "h": 0.6 }
+    ],
+    "silk": [
+      { "type": "circle", "x": 1.5, "y": 2.6, "d": 0.5 }
+    ]
+  },
+
+  "outline": { "width": 7.1, "height": 4.5 },
+  "outlineOffset": { "x": 0, "y": 0 },
+  "widthPins": 3,
+  "heightPins": 2,
+  "silkLabel": { "text": "SC70", "x": 4.5, "y": 2.5, "height": 0.8 },
+  "overlay": true
+}

@@ -1,0 +1,38 @@
+{
+  "id": "smd1206",
+  "name": "R,L,C 1206 (1x4)",
+  "meta": {
+    "author": "MacGizmo.com",
+    "license": "CC-BY-SA 4.0",
+    "source": "Based on KiCad Libraries"
+  },
+  "category": "Passive",
+  "pitch": 2.54,
+  "color": "#c08060",
+
+  "throughPins": [
+    { "col": 0, "row": 0, "label": "1" },
+    { "col": 3, "row": 0, "label": "2" }
+  ],
+
+  "features": {
+    "copper": [
+      { "type": "pad", "x": 2.26, "y": 0, "w": 1.3, "h": 1.75 },
+      { "type": "pad", "x": 5.36, "y": 0, "w": 1.3, "h": 1.75 },
+
+      { "type": "trace", "x1": 2.286, "y1": 0, "x2": 0, "y2": 0, "w": 0.5 },
+      { "type": "trace", "x1": 5.334, "y1": 0, "x2": 7.62, "y2": 0, "w": 0.5 }
+    ],
+    "mask": [
+      { "type": "pad", "x": 2.26, "y": 0, "w": 1.4, "h": 1.85 },
+      { "type": "pad", "x": 5.36, "y": 0, "w": 1.4, "h": 1.85 }
+    ],
+    "silk": []
+  },
+
+  "outline": { "width": 9.6, "height": 2 },
+  "outlineOffset": { "x": 0, "y": 0 },
+  "widthPins": 4,
+  "heightPins": 1,
+  "overlay": true
+}

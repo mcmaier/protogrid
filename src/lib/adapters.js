@@ -10,10 +10,19 @@
  *   - features: Gerber primitives relative to origin (col 0, row 0 position)
  *     - copper[]: pads and traces on copper layer
  *     - mask[]: solder mask openings
+ *     - drills[]: vias and drills, outside of the throughPin Grid
  *     - silk[]: silkscreen outlines
+ *     - silkText[]: Pin and part Designators
+ *   - optionalFeatures: Additional Gerber primitives relative to origin (col 0, row 0 position)
+ *     - copper[]: pads and traces on copper layer
+ *     - drills[]: vias and drills, outside of the throughPin Grid
+ *     - mask[]: solder mask openings
+ *     - silk[]: silkscreen outlines
+ *     - silkText[]: Pin and part Designators
  *   - outline: { width, height } in mm for preview rendering
  *   - outlineOffset: optional { x, y } mm offset
  *   - widthPins, heightPins: reserved grid rectangle (all inner pads suppressed)
+ *   - silkLabel: Name of the adapter printed in silkscreen,
  *
  * Coordinate system:
  *   Origin (0,0) = grid position (col 0, row 0) of the adapter.
@@ -25,1285 +34,395 @@
  *   { type: 'circle', x, y, d }          – circular feature
  *   { type: 'trace', x1, y1, x2, y2, w } – copper trace
  *   { type: 'poly', points: [{x,y}...] } – silkscreen polyline
- *
- * Layout principle:
- *   SMD footprint centered within reserved grid rectangle.
- *   Interface TH pads on outer edges. Fanout traces connect
- *   SMD pads to TH pads via multi-segment routes (stub → diagonal → horizontal).
- *   Inner grid positions blocked to prevent overlap with SMD features.
- *
- * Package reference data:
- *   SOT-23:  body 2.9×1.3mm, pitch 0.95mm, pad 1.0×0.6mm
- *   SC-70:   body 2.0×1.25mm, pitch 0.65mm, pad 0.8×0.5mm
- *   SOIC:    body 3.9mm wide, pitch 1.27mm, pad 1.5×0.6mm
- *   SOIC-W:  body 7.5mm wide, pitch 1.27mm, pad 1.5×0.6mm
- *   TSSOP:   body 4.4mm wide, pitch 0.65mm, pad 1.1×0.4mm
- *   MSOP:    body 3.0mm wide, pitch 0.65mm, pad 1.0×0.4mm
+ *   { type: 'text', text, x,y, height, rotation } – silkscreen text
  */
+
+
+import { getPitchProfile } from './gridProfiles.js';
+
+/** Base path for module overlay PNGs. */
+export let adapterOverlayBasePath = './assets/adapters';
+export const VARIABLE_SUBGRID_ADAPTER_ID = 'subgrid-variable';
+export const VARIABLE_SUBGRID_PAD_SHAPES = ['circle', 'square', 'square-smd'];
+
+/** Runtime-registered custom adapters (updated via registerCustomAdapters). */
+let _customAdapters = [];
+
+/** Runtime-registered server library adapters (updated via registerServerAdapters). */
+let _serverAdapters = [];
+
+/**
+ * Called by App.svelte whenever the customAdaptersList store changes.
+ * Keeps the plain-JS lookup functions in sync without requiring Svelte runes here.
+ * @param {any[]} list
+ */
+export function registerCustomAdapters(list) {
+  _customAdapters = list;
+}
+
+/**
+ * Called by App.svelte whenever the serverAdapters store changes.
+ * @param {any[]} list
+ */
+export function registerServerAdapters(list) {
+  _serverAdapters = list;
+}
+
+/** Returns all built-in + server library + custom adapters combined. */
+export function getAllAdapters() {
+  return [...ADAPTER_LIBRARY, ..._serverAdapters, ..._customAdapters];
+}
+
+/**
+ * Validate a single adapter definition object.
+ * Returns an error string if invalid, or null if valid.
+ * @param {any} item
+ * @returns {string|null}
+ */
+export function validateAdapterDef(item) {
+  if (item == null || typeof item !== 'object') return 'Adapter must be a non-null object';
+  if (typeof item.id !== 'string' || !item.id) return 'Missing or invalid "id"';
+  if (typeof item.name !== 'string' || !item.name) return 'Missing or invalid "name"';
+  if (typeof item.category !== 'string') return 'Missing "category"';
+  if (typeof item.pitch !== 'number') return `"pitch" must be a number (got ${typeof item.pitch})`;
+  if (!Array.isArray(item.throughPins)) return 'Missing "throughPins" array';
+  if (!item.features || typeof item.features !== 'object') return 'Missing "features" object';
+  if (!Array.isArray(item.features.copper)) return 'Missing "features.copper" array';
+  if (!item.outline || typeof item.outline.width !== 'number' || typeof item.outline.height !== 'number')
+    return 'Missing or invalid "outline" ({width, height})';
+  if (typeof item.widthPins !== 'number') return 'Missing "widthPins"';
+  if (typeof item.heightPins !== 'number') return 'Missing "heightPins"';
+  return null;
+}
+
+
+/** Basic adapters only - other footprints are separate JSON files in assets/adapters */
 
 export const ADAPTER_LIBRARY = [
     {
-    id: 'padgrid',
-    name: 'SMD Pad Grid 6x5 for 0402',
-    category: 'SMD Pads',
-    pitch: 2.54,
-    color: '#606060',
-
-    throughPins: [
-      { col: 0, row: 2, label: '1' },
-      { col: 0, row: 1, label: '2' },
-      { col: 0, row: 0, label: '3' },
-      { col: 4, row: 0, label: '4' },
-      { col: 4, row: 1, label: '5' },
-      { col: 4, row: 2, label: '6' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 1.905, y: 5.08, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 1.905, y: 3.81, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 1.905, y: 2.54, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 1.905, y: 1.27, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 1.905, y: 0, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 3.175, y: 5.08, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 3.175, y: 3.81, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 3.175, y: 2.54, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 3.175, y: 1.27, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 3.175, y: 0, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 4.445, y: 5.08, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 4.445, y: 3.81, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 4.445, y: 2.54, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 4.445, y: 1.27, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 4.445, y: 0, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 5.715, y: 5.08, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 5.715, y: 3.81, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 5.715, y: 2.54, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 5.715, y: 1.27, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 5.715, y: 0, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 6.985, y: 5.08, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 6.985, y: 3.81, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 6.985, y: 2.54, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 6.985, y: 1.27, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 6.985, y: 0, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 8.255, y: 5.08, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 8.255, y: 3.81, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 8.255, y: 2.54, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 8.255, y: 1.27, w: 0.9, h: 0.9 },   // Pin 1
-        { type: 'pad', x: 8.255, y: 0, w: 0.9, h: 0.9 },   // Pin 1
-
-        // Fanout traces
-        { type: 'trace', x1: 0, y1: 5.08, x2: 1.905, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 0, y1: 2.54, x2: 1.905, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 0, y1: 0, x2: 1.905, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 8.255, y1: 0, x2: 10.16, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 10.16, y1: 2.54, x2: 8.255, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 10.16, y1: 5.08, x2: 8.255, y2: 5.08, w: 0.3 },
-      ],
-      mask: [
-        { type: 'pad', x: 1.905, y: 5.08, w: 1, h: 1 },
-        { type: 'pad', x: 1.905, y: 3.81, w: 1, h: 1 },
-        { type: 'pad', x: 1.905, y: 2.54, w: 1, h: 1 },
-        { type: 'pad', x: 1.905, y: 1.27, w: 1, h: 1 },
-        { type: 'pad', x: 1.905, y: 0, w: 1, h: 1 },
-        { type: 'pad', x: 3.175, y: 5.08, w: 1, h: 1 },
-        { type: 'pad', x: 3.175, y: 3.81, w: 1, h: 1 },
-        { type: 'pad', x: 3.175, y: 2.54, w: 1, h: 1 },
-        { type: 'pad', x: 3.175, y: 1.27, w: 1, h: 1 },
-        { type: 'pad', x: 3.175, y: 0, w: 1, h: 1 },
-        { type: 'pad', x: 4.445, y: 5.08, w: 1, h: 1 },
-        { type: 'pad', x: 4.445, y: 3.81, w: 1, h: 1 },
-        { type: 'pad', x: 4.445, y: 2.54, w: 1, h: 1 },
-        { type: 'pad', x: 4.445, y: 1.27, w: 1, h: 1 },
-        { type: 'pad', x: 4.445, y: 0, w: 1, h: 1 },
-        { type: 'pad', x: 5.715, y: 5.08, w: 1, h: 1 },
-        { type: 'pad', x: 5.715, y: 3.81, w: 1, h: 1 },
-        { type: 'pad', x: 5.715, y: 2.54, w: 1, h: 1 },
-        { type: 'pad', x: 5.715, y: 1.27, w: 1, h: 1 },
-        { type: 'pad', x: 5.715, y: 0, w: 1, h: 1 },
-        { type: 'pad', x: 6.985, y: 5.08, w: 1, h: 1 },
-        { type: 'pad', x: 6.985, y: 3.81, w: 1, h: 1 },
-        { type: 'pad', x: 6.985, y: 2.54, w: 1, h: 1 },
-        { type: 'pad', x: 6.985, y: 1.27, w: 1, h: 1 },
-        { type: 'pad', x: 6.985, y: 0, w: 1, h: 1 },
-        { type: 'pad', x: 8.255, y: 5.08, w: 1, h: 1 },
-        { type: 'pad', x: 8.255, y: 3.81, w: 1, h: 1 },
-        { type: 'pad', x: 8.255, y: 2.54, w: 1, h: 1 },
-        { type: 'pad', x: 8.255, y: 1.27, w: 1, h: 1 },
-        { type: 'pad', x: 8.255, y: 0, w: 1, h: 1 },
-      ],
-      silk: [
-        //{ type: 'circle', x: 1.605, y: 5.58, d: 0.25 },
-      ],
+      id: VARIABLE_SUBGRID_ADAPTER_ID,
+      name: 'Variable Sub-Grid',     
+      color: '#606060',
+      throughPins: [],
+      features: {
+        copper: [],
+        copperBack: [],
+        mask: [],
+        silk: [],
+        silkText: [],
+        drills: [],
+      },
+      outline: { width: 9.2, height: 9.2 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 4,
+      heightPins: 4,
+      isResizable: true,
+      subGridPitches: [2.54, 2.00, 1.27],
     },
-
-    outline: { width: 12.2, height: 7.1 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 5,
-    heightPins: 3,
-    //silkLabel: { text: 'GRID', x: 5.08, y: 2.54, height: 1.0 },
-  },
 
     {
-    id: 'padgrid-0805',
-    name: 'SMD Pad Grid 4x4 for 0805/0603',
-    category: 'SMD Pads',
-    pitch: 2.54,
-    color: '#606060',
+      id: 'bridge_1x3_254',
+      name: 'Bridge (1x3)',
+      category: 'Bridge',
+      pitch: 2.54,
+      color: '#606060',
 
-    throughPins: [
-      { col: 0, row: 3, label: '1' },
-      { col: 0, row: 2, label: '2' },
-      { col: 0, row: 1, label: '3' },
-      { col: 0, row: 0, label: '4' },
-      { col: 4, row: 0, label: '5' },
-      { col: 4, row: 1, label: '6' },
-      { col: 4, row: 2, label: '7' },
-      { col: 4, row: 3, label: '8' },
-    ],
+      throughPins: [
+        { col: 0, row: 0, label: '1' },
+        { col: 1, row: 0, label: '2' },
+        { col: 2, row: 0, label: '3' },
+      ],
 
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 1.27, y: 7.62, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 1.27, y: 5.08, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 1.27, y: 2.54, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 1.27, y: 0, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 3.81, y: 7.62, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 3.81, y: 5.08, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 3.81, y: 2.54, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 3.81, y: 0, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 6.35, y: 7.62, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 6.35, y: 5.08, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 6.35, y: 2.54, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 6.35, y: 0, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 8.89, y: 7.62, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 8.89, y: 5.08, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 8.89, y: 2.54, w: 1.3, h: 1.3 },   // Pin 1
-        { type: 'pad', x: 8.89, y: 0, w: 1.3, h: 1.3 },   // Pin 1
+      features: {
+        copper: [],
+        copperBack: [
+          // F.Cu traces
+          { type: 'trace', x1: 0, y1: 0, x2: 1.5, y2: 1.3, w: 0.4 },
+          { type: 'trace', x1: 1.5, y1: 1.3, x2: 3.5, y2: 1.3, w: 0.4 },
+          { type: 'trace', x1: 3.5, y1: 1.3, x2: 5.08, y2: 0, w: 0.4 },
+        ],
+        mask: [
+        ],
+        silk: [
+        ],
+      },
 
-        // Fanout traces
-      ],
-      mask: [
-        { type: 'pad', x: 1.27, y: 7.62, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 1.27, y: 5.08, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 1.27, y: 2.54, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 1.27, y: 0, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 3.81, y: 7.62, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 3.81, y: 5.08, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 3.81, y: 2.54, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 3.81, y: 0, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 6.35, y: 7.62, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 6.35, y: 5.08, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 6.35, y: 2.54, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 6.35, y: 0, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 8.89, y: 7.62, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 8.89, y: 5.08, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 8.89, y: 2.54, w: 1.4, h: 1.4 },
-        { type: 'pad', x: 8.89, y: 0, w: 1.4, h: 1.4 },
-      ],
-      silk: [
-        //{ type: 'circle', x: 0.97, y: 8.12, d: 0.25 },
-      ],
+      outline: { width: 7.1, height: 2 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 3,
+      heightPins: 1,
     },
-
-    outline: { width: 12.2, height: 9.6 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 5,
-    heightPins: 4,
-    //silkLabel: { text: '0805', x: 5.08, y: 3.81, height: 1.0 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SMD 0805/0603  (2-pad passive, 1×3 grid)
-  // Grid: 1×3  |  TH pins: (0,0) (0,2)
-  // For resistors, capacitors, etc.  Center pad (0,1) is free.
-  //
-  //  TH(1) ── SMD pad ─┐
-  //           0805/0603  │ body
-  //  TH(2) ── SMD pad ─┘
-  //
-  // 0805 pad: 1.0 × 1.2mm, center-to-center 1.8mm
-  // 0603 pad: 0.8 × 0.9mm, center-to-center 1.6mm
-  // Using 0805 dimensions (fits 0603 too, just less pad overlap)
-  // ═══════════════════════════════════════════════════════════════════  
-  {
-    id: 'smd2-3',
-    name: 'R,L,C 0603/0805 (1×3)',
-    category: 'Passive',
-    pitch: 2.54,
-    color: '#c08060',
-
-    throughPins: [
-      { col: 0, row: 0, label: '1' },
-      { col: 0, row: 2, label: '2' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads (1.0 × 1.2mm) centered at x=0, spaced 1.8mm apart
-        // Centered vertically in 1×3 grid (center = y=2.54)
-        { type: 'pad', x: 0, y: 1.64, w: 1.2, h: 1.0 },   // Pad 1
-        { type: 'pad', x: 0, y: 3.44, w: 1.2, h: 1.0 },   // Pad 2
-
-        // Traces: direct vertical to TH pads
-        // Pad 1 → TH (0,0) at y=0
-        { type: 'trace', x1: 0, y1: 1.64, x2: 0, y2: 0, w: 0.3 },
-        // Pad 2 → TH (0,2) at y=5.08
-        { type: 'trace', x1: 0, y1: 3.44, x2: 0, y2: 5.08, w: 0.3 },
-      ],
-      mask: [
-        { type: 'pad', x: 0, y: 1.64, w: 1.3, h: 1.1 },
-        { type: 'pad', x: 0, y: 3.44, w: 1.3, h: 1.1 },
-      ],
-      silk: [
-        //{ type: 'circle', x: 1.96, y: 0.5, d: 0.25 },
-      ],
-    },
-    outline: { width: 2.0, height: 6.5 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 1,
-    heightPins: 3,
-    //silkLabel: { text: '0805', x: 0.0, y: 2.54, height: 0.8 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SMD 1206  (2-pad passive, 1×4 grid)
-  // Grid: 1×4  |  TH pins: (0,0) (0,3)
-  // ═══════════════════════════════════════════════════════════════════ 
     {
-    id: 'smd1206',
-    name: 'R,L,C 1206 (1x4)',
-    category: 'Passive',
-    pitch: 2.54,
-    color: '#c08060',
+      id: 'bridge_1x4_254',
+      name: 'Bridge (1x4)',
+      category: 'Bridge',
+      pitch: 2.54,
+      color: '#606060',
 
-    throughPins: [
-      { col: 0, row: 0, label: '1' },
-      { col: 3, row: 0, label: '2' },
-    ],
+      throughPins: [
+        { col: 0, row: 0, label: '1' },
+        { col: 1, row: 0, label: '2' },
+        { col: 2, row: 0, label: '3' },
+        { col: 3, row: 0, label: '4' },
+      ],
 
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 2.26, y: 0, w: 1.3, h: 1.75 },   // Pin 1
-        { type: 'pad', x: 5.36, y: 0, w: 1.3, h: 1.75 },   // Pin 2
+      features: {
+        copper: [],
+        copperBack: [
+          // F.Cu traces
+          { type: 'trace', x1: 0, y1: 0, x2: 1.5, y2: 1.3, w: 0.4 },
+          { type: 'trace', x1: 1.5, y1: 1.3, x2: 6, y2: 1.3, w: 0.4 },
+          { type: 'trace', x1: 6, y1: 1.3, x2: 7.62, y2: 0, w: 0.4 },
+        ],
+        mask: [
+        ],
+        silk: [
+        ],
+      },
 
-        // Fanout traces
-        { type: 'trace', x1: 2.286, y1: 0, x2: 0, y2: 0, w: 0.5 },
-        { type: 'trace', x1: 5.334, y1: 0, x2: 7.62, y2: 0, w: 0.5 },
-      ],
-      mask: [
-        { type: 'pad', x: 2.26, y: 0, w: 1.4, h: 1.85 },
-        { type: 'pad', x: 5.36, y: 0, w: 1.4, h: 1.85 },
-      ],
-      silk: [
-        //{ type: 'circle', x: 1.96, y: 0.5, d: 0.25 },
-      ],
+      outline: { width: 10, height: 2 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 4,
+      heightPins: 1,
     },
-
-    outline: { width: 9.6, height: 2 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 4,
-    heightPins: 1,
-    //silkLabel: { text: '1206', x: 3.81, y: 0.0, height: 0.8 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SOT-23-3  (3 pins, 0.95mm pitch)
-  // Grid: 3×2  |  TH pins: (0,0) (0,1) (2,0)
-  // ═══════════════════════════════════════════════════════════════════
-    {
-    id: 'sot23-3',
-    name: 'SOT-23-3',
-    category: 'SOT',
-    pitch: 2.54,
-    color: '#e0a030',
-
-    throughPins: [
-      { col: 0, row: 1, label: '1' },
-      { col: 0, row: 0, label: '2' },
-      { col: 2, row: 0, label: '3' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 1.563, y: 2.22, w: 1.325, h: 0.6 },   // Pin 1
-        { type: 'pad', x: 1.563, y: 0.32, w: 1.325, h: 0.6 },   // Pin 2
-        { type: 'pad', x: 3.838, y: 1.27, w: 1.325, h: 0.6 },   // Pin 3
-
-        // Fanout traces
-        { type: 'trace', x1: 1.397, y1: 2.286, x2: 0.254, y2: 2.286, w: 0.5 },
-        { type: 'trace', x1: 1.397, y1: 0.254, x2: 0.127, y2: 0.254, w: 0.5 },
-        { type: 'trace', x1: 3.81, y1: 1.27, x2: 4.191, y2: 1.27, w: 0.5 },
-        { type: 'trace', x1: 4.191, y1: 1.27, x2: 5.08, y2: 0, w: 0.5 },
-      ],
-      mask: [
-        { type: 'pad', x: 1.563, y: 2.22, w: 1.425, h: 0.7 },
-        { type: 'pad', x: 1.563, y: 0.32, w: 1.425, h: 0.7 },
-        { type: 'pad', x: 3.838, y: 1.27, w: 1.425, h: 0.7 },
-      ],
-      silk: [
-        { type: 'circle', x: 1.3, y: 2.9, d: 0.5 },
-          /*         
-          { type: 'poly', points: [
-          { x: 1.09, y: 0.32 }, { x: 3.99, y: 0.32 },
-          { x: 3.99, y: 2.22 }, { x: 1.09, y: 2.22 },
-          { x: 1.09, y: 0.32 },
-        ]},
-        */
-      ],
-    },
-
-    outline: { width: 7.1, height: 4.5 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 3,
-    heightPins: 2,
-    silkLabel: { text: 'SOT23', x: 4, y: 2.5, height: 0.8 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SOT-23-5/6  (5/6 pins, 0.95mm pitch)
-  // Grid: 3×3  |  TH pins: (0,0) (0,1) (0,2) (2,2) (2,0) [+ (2,1) for 6-pin]
-  // ═══════════════════════════════════════════════════════════════════
 
     {
-    id: 'sot23-6',
-    name: 'SOT-23-5/6',
-    category: 'SOT',
-    pitch: 2.54,
-    color: '#e0a030',
+      id: 'bridge_1x3_200',
+      name: 'Bridge (1x3)',
+      category: 'Bridge',
+      pitch: 2.00,
+      color: '#606060',
 
-    throughPins: [
-      { col: 0, row: 2, label: '1' },
-      { col: 0, row: 1, label: '2' },
-      { col: 3, row: 0, label: '3' },
-      { col: 3, row: 2, label: '6' },
-      { col: 0, row: 0, label: '5' },
-      { col: 3, row: 1, label: '4' },
-    ],
+      throughPins: [
+        { col: 0, row: 0, label: '1' },
+        { col: 1, row: 0, label: '2' },
+        { col: 2, row: 0, label: '3' },
+      ],
 
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 2.46, y: 3.49, w: 1.56, h: 0.65 },   // Pin 1
-        { type: 'pad', x: 2.46, y: 2.54, w: 1.56, h: 0.65 },   // Pin 2
-        { type: 'pad', x: 2.46, y: 1.59, w: 1.56, h: 0.65 },   // Pin 3
-        { type: 'pad', x: 5.16, y: 1.59, w: 1.56, h: 0.65 },   // Pin 4
-        { type: 'pad', x: 5.16, y: 2.54, w: 1.56, h: 0.65 },   // Pin 5
-        { type: 'pad', x: 5.16, y: 3.49, w: 1.56, h: 0.65 },   // Pin 6
+      features: {
+        copper: [],
+        copperBack: [
+          // F.Cu traces
+          { type: 'trace', x1: 0, y1: 0, x2: 1, y2: 1, w: 0.3 },
+          { type: 'trace', x1: 1, y1: 1, x2: 3, y2: 1, w: 0.3 },
+          { type: 'trace', x1: 3, y1: 1, x2: 4, y2: 0, w: 0.3 },
+        ],
+        mask: [
+        ],
+        silk: [
+        ],
+      },
 
-        // Fanout traces
-        { type: 'trace', x1: 2.413, y1: 2.54, x2: 0, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 5.08, y1: 2.54, x2: 7.62, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 2.413, y1: 3.556, x2: 1.524, y2: 3.556, w: 0.3 },
-        { type: 'trace', x1: 1.524, y1: 3.556, x2: 0, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 2.413, y1: 1.524, x2: 1.524, y2: 1.524, w: 0.3 },
-        { type: 'trace', x1: 1.524, y1: 1.524, x2: 0, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 5.08, y1: 1.524, x2: 6.096, y2: 1.524, w: 0.3 },
-        { type: 'trace', x1: 6.096, y1: 1.524, x2: 7.62, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 5.207, y1: 3.556, x2: 6.096, y2: 3.556, w: 0.3 },
-        { type: 'trace', x1: 6.096, y1: 3.556, x2: 7.62, y2: 5.08, w: 0.3 },
-      ],
-      mask: [
-        { type: 'pad', x: 2.46, y: 3.49, w: 1.66, h: 0.75 },
-        { type: 'pad', x: 2.46, y: 2.54, w: 1.66, h: 0.75 },
-        { type: 'pad', x: 2.46, y: 1.59, w: 1.66, h: 0.75 },
-        { type: 'pad', x: 5.16, y: 1.59, w: 1.66, h: 0.75 },
-        { type: 'pad', x: 5.16, y: 2.54, w: 1.66, h: 0.75 },
-        { type: 'pad', x: 5.16, y: 3.49, w: 1.66, h: 0.75 },
-      ],
-      silk: [
-        { type: 'circle', x: 2.2, y: 4.3, d: 0.5 },
-        /*
-          { type: 'poly', points: [
-          { x: 1.09, y: 1.04 }, { x: 3.99, y: 1.04 },
-          { x: 3.99, y: 4.04 }, { x: 1.09, y: 4.04 },
-          { x: 1.09, y: 1.04 },
-        ]},
-         */
-      ],
+      outline: { width: 6, height: 1.8 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 3,
+      heightPins: 1,
     },
-
-    outline: { width: 9.6, height: 7.1 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 4,
-    heightPins: 3,
-    silkLabel: { text: 'SOT23-6', x: 3.81, y: 0, height: 0.8 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SC-70-3  (3 pins, 0.65mm pitch)
-  // Grid: 3×2  |  TH pins: (0,0) (0,1) (2,0)
-  // Smaller body than SOT-23, tighter pad spacing
-  // ═══════════════════════════════════════════════════════════════════
-  {
-  id: 'sc70-3',
-  name: 'SC-70-3',
-  category: 'SOT',
-  pitch: 2.54,
-  color: '#e0a030',
-
-  throughPins: [
-    { col: 0, row: 1, label: '1' },
-    { col: 0, row: 0, label: '2' },
-    { col: 2, row: 0, label: '3' },
-  ],
-
-  features: {
-    copper: [
-      // SMD pads
-      { type: 'pad', x: 1.603, y: 1.92, w: 1.225, h: 0.5 },   // Pin 1
-      { type: 'pad', x: 1.603, y: 0.62, w: 1.225, h: 0.5 },   // Pin 2
-      { type: 'pad', x: 3.478, y: 1.27, w: 1.225, h: 0.5 },   // Pin 3
-
-      // Fanout traces
-      { type: 'trace', x1: 1.651, y1: 1.905, x2: 0.889, y2: 1.905, w: 0.3 },
-      { type: 'trace', x1: 0.889, y1: 1.905, x2: 0, y2: 2.54, w: 0.3 },
-      { type: 'trace', x1: 1.651, y1: 0.635, x2: 0.889, y2: 0.635, w: 0.3 },
-      { type: 'trace', x1: 0.889, y1: 0.635, x2: 0, y2: 0, w: 0.3 },
-      { type: 'trace', x1: 3.429, y1: 1.27, x2: 4.191, y2: 1.27, w: 0.3 },
-      { type: 'trace', x1: 4.191, y1: 1.27, x2: 4.445, y2: 1.27, w: 0.3 },
-      { type: 'trace', x1: 4.445, y1: 1.27, x2: 5.08, y2: 0.635, w: 0.3 },
-      { type: 'trace', x1: 5.08, y1: 0.635, x2: 5.08, y2: 0, w: 0.3 },
-    ],
-    mask: [
-      { type: 'pad', x: 1.603, y: 1.92, w: 1.325, h: 0.6 },
-      { type: 'pad', x: 1.603, y: 0.62, w: 1.325, h: 0.6 },
-      { type: 'pad', x: 3.478, y: 1.27, w: 1.325, h: 0.6 },
-    ],
-    silk: [
-      { type: 'circle', x: 1.5, y: 2.6, d: 0.5 },
-      /*
-        { type: 'poly', points: [
-        { x: 1.27, y: 0.52 }, { x: 3.81, y: 0.52 },
-        { x: 3.81, y: 2.02 }, { x: 1.27, y: 2.02 },
-        { x: 1.27, y: 0.52 },
-      ]},
-        */
-    ],
-  },
-
-  outline: { width: 7.1, height: 4.5 },
-  outlineOffset: { x: 0, y: 0 },
-  widthPins: 3,
-  heightPins: 2,
-    silkLabel: { text: 'SC70', x: 4.5, y: 2.5, height: 0.8 },
-},
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SC-70-5/6  (5/6 pins, 0.65mm pitch)
-  // Grid: 3×3  |  TH pins: (0,0) (0,1) (0,2) (2,2) (2,1) (2,0)
-  // ═══════════════════════════════════════════════════════════════════
-
     {
-    id: 'sc70-6',
-    name: 'SC-70-5/6',
-    category: 'SOT',
-    pitch: 2.54,
-    color: '#e0a030',
+      id: 'bridge_1x4_200',
+      name: 'Bridge (1x4)',
+      category: 'Bridge',
+      pitch: 2.00,
+      color: '#606060',
 
-    throughPins: [
-      { col: 0, row: 2, label: '1' },
-      { col: 0, row: 1, label: '2' },
-      { col: 0, row: 0, label: '3' },
-      { col: 3, row: 0, label: '4' },
-      { col: 3, row: 1, label: '5' },
-      { col: 3, row: 2, label: '6' },
-    ],
+      throughPins: [
+        { col: 0, row: 0, label: '1' },
+        { col: 1, row: 0, label: '2' },
+        { col: 2, row: 0, label: '3' },
+        { col: 3, row: 0, label: '4' },
+      ],
 
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 2.48, y: 3.19, w: 1.5, h: 0.4 },   // Pin 1
-        { type: 'pad', x: 2.48, y: 2.54, w: 1.5, h: 0.4 },   // Pin 2
-        { type: 'pad', x: 2.48, y: 1.89, w: 1.5, h: 0.4 },   // Pin 3
-        { type: 'pad', x: 5.14, y: 1.89, w: 1.5, h: 0.4 },   // Pin 4
-        { type: 'pad', x: 5.14, y: 2.54, w: 1.5, h: 0.4 },   // Pin 5
-        { type: 'pad', x: 5.14, y: 3.19, w: 1.5, h: 0.4 },   // Pin 6
+      features: {
+        copper: [],
+        copperBack: [
+          // F.Cu traces
+          { type: 'trace', x1: 0, y1: 0, x2: 1, y2: 1, w: 0.3 },
+          { type: 'trace', x1: 1, y1: 1, x2: 5, y2: 1, w: 0.3 },
+          { type: 'trace', x1: 5, y1: 1, x2: 6, y2: 0, w: 0.3 },
+        ],
+        mask: [
+        ],
+        silk: [
+        ],
+      },
 
-        // Fanout traces
-        { type: 'trace', x1: 2.413, y1: 3.175, x2: 1.524, y2: 3.175, w: 0.3 },
-        { type: 'trace', x1: 1.524, y1: 3.175, x2: 0, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 2.413, y1: 2.54, x2: 0, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 2.413, y1: 1.905, x2: 1.524, y2: 1.905, w: 0.3 },
-        { type: 'trace', x1: 1.524, y1: 1.905, x2: 0, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 5.207, y1: 3.175, x2: 6.096, y2: 3.175, w: 0.3 },
-        { type: 'trace', x1: 6.096, y1: 3.175, x2: 7.62, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 5.08, y1: 2.54, x2: 7.62, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 5.207, y1: 1.905, x2: 6.096, y2: 1.905, w: 0.3 },
-        { type: 'trace', x1: 6.096, y1: 1.905, x2: 7.62, y2: 0, w: 0.3 },
-      ],
-      mask: [
-        { type: 'pad', x: 2.48, y: 3.19, w: 1.6, h: 0.5 },
-        { type: 'pad', x: 2.48, y: 2.54, w: 1.6, h: 0.5 },
-        { type: 'pad', x: 2.48, y: 1.89, w: 1.6, h: 0.5 },
-        { type: 'pad', x: 5.14, y: 1.89, w: 1.6, h: 0.5 },
-        { type: 'pad', x: 5.14, y: 2.54, w: 1.6, h: 0.5 },
-        { type: 'pad', x: 5.14, y: 3.19, w: 1.6, h: 0.5 },
-      ],
-      silk: [
-        { type: 'circle', x: 2.3, y: 4, d: 0.5 },
-        /*{ type: 'poly', points: [
-          { x: 1.27, y: 1.44 }, { x: 3.81, y: 1.44 },
-          { x: 3.81, y: 3.64 }, { x: 1.27, y: 3.64 },
-          { x: 1.27, y: 1.44 },
-        ]},*/
-      ],
+      outline: { width: 8, height: 1.8 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 4,
+      heightPins: 1,
     },
+{
+      id: 'bridge_1x3_127',
+      name: 'Bridge (1x3)',
+      category: 'Bridge',
+      pitch: 1.27,
+      color: '#606060',
 
-    outline: { width: 9.6, height: 7.1 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 4,
-    heightPins: 3,
-    silkLabel: { text: 'SC70-6', x: 3.81, y: 0, height: 0.8 },
-  },
+      throughPins: [
+        { col: 0, row: 0, label: '1' },
+        { col: 2, row: 0, label: '3' },
+      ],
+
+      features: {
+        copper: [
+          { type: 'pad', x: 1.27, y: 0, w: 0.9, h: 0.9 },
+        ],
+        copperBack: [
+          // F.Cu traces
+          { type: 'trace', x1: 0, y1: 0, x2: 2.54, y2: 0, w: 0.4 },
+        ],
+        mask: [
+        ],
+        silk: [
+        ],
+      },
+
+      outline: { width: 4, height: 1.4 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 3,
+      heightPins: 1,
+    },
     {
-    id: 'sot223',
-    name: 'SOT-223',
-    category: 'SOT',
-    pitch: 2.54,
-    color: '#a060c0',
+      id: 'bridge_1x4_127',
+      name: 'Bridge (1x4)',
+      category: 'Bridge',
+      pitch: 1.27,
+      color: '#606060',
 
-    throughPins: [
-      { col: 0, row: 2, label: '1' },
-      { col: 0, row: 1, label: '2' },
-      { col: 0, row: 0, label: '3' },
-      { col: 4, row: 1, label: '4' },
-    ],
+      throughPins: [
+        { col: 0, row: 0, label: '1' },
+        { col: 3, row: 0, label: '4' },
+      ],
 
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 1.93, y: 4.84, w: 2, h: 1.5 },   // Pin 1
-        { type: 'pad', x: 1.93, y: 2.54, w: 2, h: 1.5 },   // Pin 2
-        { type: 'pad', x: 1.93, y: 0.24, w: 2, h: 1.5 },   // Pin 3
-        { type: 'pad', x: 8.23, y: 2.54, w: 2, h: 3.8 },   // Pin 4
+      features: {
+        copper: [
+          { type: 'pad', x: 1.27, y: 0, w: 0.9, h: 0.9 },
+          { type: 'pad', x: 2.54, y: 0, w: 0.9, h: 0.9 },
+        ],
+        copperBack: [
+          // F.Cu traces
+          { type: 'trace', x1: 0, y1: 0, x2: 3.81, y2: 0, w: 0.4 },
+        ],
+        mask: [
+        ],
+        silk: [
+        ],
+      },
 
-        // Fanout traces
-        { type: 'trace', x1: 0, y1: 5.08, x2: 1.905, y2: 5.08, w: 0.5 },
-        { type: 'trace', x1: 0, y1: 2.54, x2: 1.905, y2: 2.54, w: 0.5 },
-        { type: 'trace', x1: 0, y1: 0, x2: 1.905, y2: 0, w: 0.5 },
-        { type: 'trace', x1: 10.16, y1: 2.54, x2: 8.255, y2: 2.54, w: 0.5 },
-      ],
-      mask: [
-        { type: 'pad', x: 1.93, y: 4.84, w: 2.1, h: 1.6 },
-        { type: 'pad', x: 1.93, y: 2.54, w: 2.1, h: 1.6 },
-        { type: 'pad', x: 1.93, y: 0.24, w: 2.1, h: 1.6 },
-        { type: 'pad', x: 8.23, y: 2.54, w: 2.1, h: 3.9 },
-      ],
-      silk: [
-        { type: 'circle', x: 1.3, y: 6, d: 0.5 },
-      ],
+      outline: { width: 5.5, height: 1.4 },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins: 4,
+      heightPins: 1,
     },
-
-    outline: { width: 12.2, height: 7.1 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 5,
-    heightPins: 3,
-    silkLabel: { text: 'SOT223', rotation: 90, x: 5.08, y: 2.54, height: 0.8 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SOIC-8  (8 pins, 1.27mm pitch, 3.9mm body)
-  // Grid: 4×4  |  TH pins: col 0 rows 0-3, col 3 rows 0-3
-  // ═══════════════════════════════════════════════════════════════════
-  {
-    id: 'soic8',
-    name: 'SOIC-8',
-    category: 'SOIC',
-    pitch: 2.54,
-    color: '#a060c0',
-
-    throughPins: [
-      { col: 0, row: 3, label: '1' },
-      { col: 0, row: 2, label: '2' },
-      { col: 0, row: 1, label: '3' },
-      { col: 0, row: 0, label: '4' },
-      { col: 4, row: 0, label: '5' },
-      { col: 4, row: 1, label: '6' },
-      { col: 4, row: 2, label: '7' },
-      { col: 4, row: 3, label: '8' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 2.605, y: 5.715, w: 1.95, h: 0.6 },   // Pin 1
-        { type: 'pad', x: 2.605, y: 4.445, w: 1.95, h: 0.6 },   // Pin 2
-        { type: 'pad', x: 2.605, y: 3.175, w: 1.95, h: 0.6 },   // Pin 3
-        { type: 'pad', x: 2.605, y: 1.905, w: 1.95, h: 0.6 },   // Pin 4
-        { type: 'pad', x: 7.555, y: 1.905, w: 1.95, h: 0.6 },   // Pin 5
-        { type: 'pad', x: 7.555, y: 3.175, w: 1.95, h: 0.6 },   // Pin 6
-        { type: 'pad', x: 7.555, y: 4.445, w: 1.95, h: 0.6 },   // Pin 7
-        { type: 'pad', x: 7.555, y: 5.715, w: 1.95, h: 0.6 },   // Pin 8
-
-        // Fanout traces
-        { type: 'trace', x1: 2.54, y1: 5.715, x2: 1.651, y2: 5.715, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 5.715, x2: 0, y2: 7.62, w: 0.3 },
-        { type: 'trace', x1: 2.667, y1: 4.445, x2: 1.651, y2: 4.445, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 4.445, x2: 0, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 2.54, y1: 3.175, x2: 1.651, y2: 3.175, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 3.175, x2: 0, y2: 2.413, w: 0.3 },
-        { type: 'trace', x1: 2.54, y1: 1.905, x2: 1.651, y2: 1.905, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 1.905, x2: 0, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 7.493, y1: 1.905, x2: 8.509, y2: 1.905, w: 0.3 },
-        { type: 'trace', x1: 8.509, y1: 1.905, x2: 10.16, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 7.62, y1: 3.175, x2: 8.636, y2: 3.175, w: 0.3 },
-        { type: 'trace', x1: 8.636, y1: 3.175, x2: 10.16, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 7.62, y1: 4.445, x2: 8.509, y2: 4.445, w: 0.3 },
-        { type: 'trace', x1: 8.509, y1: 4.445, x2: 10.16, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 7.62, y1: 5.715, x2: 8.509, y2: 5.715, w: 0.3 },
-        { type: 'trace', x1: 8.509, y1: 5.715, x2: 10.16, y2: 7.62, w: 0.3 },
-      ],
-      mask: [
-        { type: 'pad', x: 2.605, y: 5.715, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 4.445, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 3.175, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 1.905, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 1.905, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 3.175, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 4.445, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 5.715, w: 2.05, h: 0.7 },
-      ],
-      silk: [
-        { type: 'circle', x: 2.4, y: 6.6, d: 0.5 },
-      ],
-    },
-
-    outline: { width: 12.2, height: 9.6 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 5,
-    heightPins: 4,
-    silkLabel: { text: 'SOIC-8', rotation: 90, x: 5.08, y: 3.81, height: 0.9 },
-  },
-
-  
-  // ═══════════════════════════════════════════════════════════════════
-  // SOIC-16  (16 pins, 1.27mm pitch, 3.9mm body)
-  // Grid: TODO  |  TH pins: TODO – needs wider grid for fanout
-  // TODO: manually design routing to avoid fanout crossings
-  // ═══════════════════════════════════════════════════════════════════
-    {
-    id: 'soic16',
-    name: 'SOIC-16',
-    category: 'SOIC',
-    pitch: 2.54,
-    color: '#a060c0',
-
-    throughPins: [
-      { col: 1, row: 5, label: '1' },
-      { col: 0, row: 5, label: '2' },
-      { col: 0, row: 4, label: '3' },
-      { col: 0, row: 3, label: '4' },
-      { col: 0, row: 2, label: '5' },
-      { col: 0, row: 1, label: '6' },
-      { col: 0, row: 0, label: '7' },
-      { col: 1, row: 0, label: '8' },
-      { col: 3, row: 0, label: '9' },
-      { col: 4, row: 0, label: '10' },
-      { col: 4, row: 1, label: '11' },
-      { col: 4, row: 2, label: '12' },
-      { col: 4, row: 3, label: '13' },
-      { col: 4, row: 4, label: '14' },
-      { col: 4, row: 5, label: '15' },
-      { col: 3, row: 5, label: '16' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 2.605, y: 10.795, w: 1.95, h: 0.6 },   // Pin 1
-        { type: 'pad', x: 2.605, y: 9.525, w: 1.95, h: 0.6 },   // Pin 2
-        { type: 'pad', x: 2.605, y: 8.255, w: 1.95, h: 0.6 },   // Pin 3
-        { type: 'pad', x: 2.605, y: 6.985, w: 1.95, h: 0.6 },   // Pin 4
-        { type: 'pad', x: 2.605, y: 5.715, w: 1.95, h: 0.6 },   // Pin 5
-        { type: 'pad', x: 2.605, y: 4.445, w: 1.95, h: 0.6 },   // Pin 6
-        { type: 'pad', x: 2.605, y: 3.175, w: 1.95, h: 0.6 },   // Pin 7
-        { type: 'pad', x: 2.605, y: 1.905, w: 1.95, h: 0.6 },   // Pin 8
-        { type: 'pad', x: 7.555, y: 1.905, w: 1.95, h: 0.6 },   // Pin 9
-        { type: 'pad', x: 7.555, y: 3.175, w: 1.95, h: 0.6 },   // Pin 10
-        { type: 'pad', x: 7.555, y: 4.445, w: 1.95, h: 0.6 },   // Pin 11
-        { type: 'pad', x: 7.555, y: 5.715, w: 1.95, h: 0.6 },   // Pin 12
-        { type: 'pad', x: 7.555, y: 6.985, w: 1.95, h: 0.6 },   // Pin 13
-        { type: 'pad', x: 7.555, y: 8.255, w: 1.95, h: 0.6 },   // Pin 14
-        { type: 'pad', x: 7.555, y: 9.525, w: 1.95, h: 0.6 },   // Pin 15
-        { type: 'pad', x: 7.555, y: 10.795, w: 1.95, h: 0.6 },   // Pin 16
-
-        // Fanout traces
-        { type: 'trace', x1: 2.54, y1: 10.795, x2: 2.54, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 10.795, x2: 7.62, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 1.905, x2: 7.62, y2: 0, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 1.905, x2: 2.54, y2: 0, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 3.175, x2: 1.524, y2: 3.175, w: 0.25 },
-        { type: 'trace', x1: 1.524, y1: 3.175, x2: 1.143, y2: 2.794, w: 0.25 },
-        { type: 'trace', x1: 1.143, y1: 2.794, x2: 1.143, y2: 0.889, w: 0.25 },
-        { type: 'trace', x1: 1.143, y1: 0.889, x2: 0, y2: 0, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 4.445, x2: 1.524, y2: 4.445, w: 0.25 },
-        { type: 'trace', x1: 1.524, y1: 4.445, x2: 0, y2: 2.921, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 5.715, x2: 0.889, y2: 5.715, w: 0.25 },
-        { type: 'trace', x1: 0.889, y1: 5.715, x2: 0.127, y2: 5.08, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 6.985, x2: 0.889, y2: 6.985, w: 0.25 },
-        { type: 'trace', x1: 0.889, y1: 6.985, x2: 0, y2: 7.62, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 8.255, x2: 1.397, y2: 8.255, w: 0.25 },
-        { type: 'trace', x1: 1.397, y1: 8.255, x2: 0.127, y2: 9.652, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 9.525, x2: 1.397, y2: 9.525, w: 0.25 },
-        { type: 'trace', x1: 1.397, y1: 9.525, x2: 1.143, y2: 9.779, w: 0.25 },
-        { type: 'trace', x1: 1.143, y1: 9.779, x2: 1.143, y2: 11.557, w: 0.25 },
-        { type: 'trace', x1: 1.143, y1: 11.557, x2: 0, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 9.525, x2: 8.636, y2: 9.525, w: 0.25 },
-        { type: 'trace', x1: 8.636, y1: 9.525, x2: 8.89, y2: 9.779, w: 0.25 },
-        { type: 'trace', x1: 8.89, y1: 9.779, x2: 9.017, y2: 9.906, w: 0.25 },
-        { type: 'trace', x1: 9.017, y1: 9.906, x2: 9.017, y2: 11.557, w: 0.25 },
-        { type: 'trace', x1: 9.017, y1: 11.557, x2: 10.16, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 8.255, x2: 8.763, y2: 8.255, w: 0.25 },
-        { type: 'trace', x1: 8.763, y1: 8.255, x2: 10.16, y2: 9.779, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 6.985, x2: 9.271, y2: 6.985, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 6.985, x2: 10.16, y2: 7.62, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 5.715, x2: 9.271, y2: 5.715, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 5.715, x2: 10.16, y2: 5.08, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 4.445, x2: 8.636, y2: 4.445, w: 0.25 },
-        { type: 'trace', x1: 8.636, y1: 4.445, x2: 10.16, y2: 3.048, w: 0.25 },
-        { type: 'trace', x1: 7.62, y1: 3.175, x2: 8.636, y2: 3.175, w: 0.25 },
-        { type: 'trace', x1: 8.636, y1: 3.175, x2: 9.017, y2: 2.794, w: 0.25 },
-        { type: 'trace', x1: 9.017, y1: 2.794, x2: 9.017, y2: 1.143, w: 0.25 },
-        { type: 'trace', x1: 9.017, y1: 1.143, x2: 10.16, y2: 0, w: 0.25 },
-      ],
-      mask: [
-        { type: 'pad', x: 2.605, y: 10.795, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 9.525, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 8.255, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 6.985, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 5.715, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 4.445, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 3.175, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 2.605, y: 1.905, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 1.905, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 3.175, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 4.445, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 5.715, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 6.985, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 8.255, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 9.525, w: 2.05, h: 0.7 },
-        { type: 'pad', x: 7.555, y: 10.795, w: 2.05, h: 0.7 },
-      ],
-      silk: [
-        { type: 'circle', x: 1.8, y: 11.6, d: 0.5 },
-        /*{ type: 'poly', points: [
-          { x: 1.6, y: 1.15 }, { x: 6.02, y: 1.15 },
-          { x: 6.02, y: 11.5 }, { x: 1.6, y: 11.5 },
-          { x: 1.6, y: 1.15 },
-         */
-      ],
-    },
-
-    outline: { width: 12.2, height: 14.7 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 5,
-    heightPins: 6,
-    silkLabel: { text: 'SOIC-16', rotation: 90, x: 5.08, y: 6.35, height: 0.9 },
-  }, 
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SOIC-20W  (20 pins, 1.27mm pitch, wide body)
-  // ═══════════════════════════════════════════════════════════════════
-  
-    {
-    id: 'soic20w',
-    name: 'SOIC-16/18/20W',
-    category: 'SOIC',
-    pitch: 2.54,
-    color: '#a060c0',
-
-    throughPins: [
-      { col: 1, row: 7, label: '1' },
-      { col: 0, row: 7, label: '2' },
-      { col: 0, row: 6, label: '3' },
-      { col: 0, row: 5, label: '4' },
-      { col: 0, row: 4, label: '5' },
-      { col: 0, row: 3, label: '6' },
-      { col: 0, row: 2, label: '7' },
-      { col: 0, row: 1, label: '8' },
-      { col: 0, row: 0, label: '9' },
-      { col: 1, row: 0, label: '10' },
-      { col: 6, row: 0, label: '11' },
-      { col: 7, row: 0, label: '12' },
-      { col: 7, row: 1, label: '13' },
-      { col: 7, row: 2, label: '14' },
-      { col: 7, row: 3, label: '15' },
-      { col: 7, row: 4, label: '16' },
-      { col: 7, row: 5, label: '17' },
-      { col: 7, row: 6, label: '18' },
-      { col: 7, row: 7, label: '19' },
-      { col: 6, row: 7, label: '20' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 4.24, y: 14.605, w: 2.05, h: 0.6 },   // Pin 1
-        { type: 'pad', x: 4.24, y: 13.335, w: 2.05, h: 0.6 },   // Pin 2
-        { type: 'pad', x: 4.24, y: 12.065, w: 2.05, h: 0.6 },   // Pin 3
-        { type: 'pad', x: 4.24, y: 10.795, w: 2.05, h: 0.6 },   // Pin 4
-        { type: 'pad', x: 4.24, y: 9.525, w: 2.05, h: 0.6 },   // Pin 5
-        { type: 'pad', x: 4.24, y: 8.255, w: 2.05, h: 0.6 },   // Pin 6
-        { type: 'pad', x: 4.24, y: 6.985, w: 2.05, h: 0.6 },   // Pin 7
-        { type: 'pad', x: 4.24, y: 5.715, w: 2.05, h: 0.6 },   // Pin 8
-        { type: 'pad', x: 4.24, y: 4.445, w: 2.05, h: 0.6 },   // Pin 9
-        { type: 'pad', x: 4.24, y: 3.175, w: 2.05, h: 0.6 },   // Pin 10
-        { type: 'pad', x: 13.54, y: 3.175, w: 2.05, h: 0.6 },   // Pin 11
-        { type: 'pad', x: 13.54, y: 4.445, w: 2.05, h: 0.6 },   // Pin 12
-        { type: 'pad', x: 13.54, y: 5.715, w: 2.05, h: 0.6 },   // Pin 13
-        { type: 'pad', x: 13.54, y: 6.985, w: 2.05, h: 0.6 },   // Pin 14
-        { type: 'pad', x: 13.54, y: 8.255, w: 2.05, h: 0.6 },   // Pin 15
-        { type: 'pad', x: 13.54, y: 9.525, w: 2.05, h: 0.6 },   // Pin 16
-        { type: 'pad', x: 13.54, y: 10.795, w: 2.05, h: 0.6 },   // Pin 17
-        { type: 'pad', x: 13.54, y: 12.065, w: 2.05, h: 0.6 },   // Pin 18
-        { type: 'pad', x: 13.54, y: 13.335, w: 2.05, h: 0.6 },   // Pin 19
-        { type: 'pad', x: 13.54, y: 14.605, w: 2.05, h: 0.6 },   // Pin 20
-
-        // Fanout traces
-        { type: 'trace', x1: 4.318, y1: 13.335, x2: 3.048, y2: 13.335, w: 0.25 },
-        { type: 'trace', x1: 3.048, y1: 13.335, x2: 2.032, y2: 14.351, w: 0.25 },
-        { type: 'trace', x1: 2.032, y1: 14.351, x2: 2.032, y2: 16.002, w: 0.25 },
-        { type: 'trace', x1: 2.032, y1: 16.002, x2: 0.508, y2: 17.78, w: 0.25 },
-        { type: 'trace', x1: 4.191, y1: 12.065, x2: 3.048, y2: 12.065, w: 0.25 },
-        { type: 'trace', x1: 3.048, y1: 12.065, x2: 0.127, y2: 15.113, w: 0.25 },
-        { type: 'trace', x1: 4.191, y1: 10.795, x2: 2.921, y2: 10.795, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 10.795, x2: 1.016, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 1.016, y1: 12.7, x2: -0.127, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 4.191, y1: 9.525, x2: 1.016, y2: 9.525, w: 0.25 },
-        { type: 'trace', x1: 1.016, y1: 9.525, x2: 0.254, y2: 10.16, w: 0.25 },
-        { type: 'trace', x1: 4.191, y1: 8.255, x2: 1.016, y2: 8.255, w: 0.25 },
-        { type: 'trace', x1: 1.016, y1: 8.255, x2: 0.127, y2: 7.747, w: 0.25 },
-        { type: 'trace', x1: 4.318, y1: 6.985, x2: 2.794, y2: 6.985, w: 0.25 },
-        { type: 'trace', x1: 2.794, y1: 6.985, x2: 1.016, y2: 5.334, w: 0.25 },
-        { type: 'trace', x1: 1.016, y1: 5.334, x2: 0, y2: 5.334, w: 0.25 },
-        { type: 'trace', x1: 4.191, y1: 5.715, x2: 3.048, y2: 5.715, w: 0.25 },
-        { type: 'trace', x1: 3.048, y1: 5.715, x2: 0.127, y2: 3.048, w: 0.25 },
-        { type: 'trace', x1: 4.191, y1: 4.445, x2: 3.048, y2: 4.445, w: 0.25 },
-        { type: 'trace', x1: 3.048, y1: 4.445, x2: 1.905, y2: 3.429, w: 0.25 },
-        { type: 'trace', x1: 1.905, y1: 3.429, x2: 1.905, y2: 2.159, w: 0.25 },
-        { type: 'trace', x1: 1.905, y1: 2.159, x2: 1.905, y2: 1.778, w: 0.25 },
-        { type: 'trace', x1: 1.905, y1: 1.778, x2: 0.127, y2: 0.127, w: 0.25 },
-        { type: 'trace', x1: 3.937, y1: 3.175, x2: 3.175, y2: 3.175, w: 0.25 },
-        { type: 'trace', x1: 3.175, y1: 3.175, x2: 2.667, y2: 2.667, w: 0.25 },
-        { type: 'trace', x1: 2.667, y1: 2.667, x2: 2.667, y2: 0, w: 0.25 },
-        { type: 'trace', x1: 3.937, y1: 14.605, x2: 3.175, y2: 14.605, w: 0.25 },
-        { type: 'trace', x1: 3.175, y1: 14.605, x2: 2.794, y2: 14.986, w: 0.25 },
-        { type: 'trace', x1: 2.794, y1: 14.986, x2: 2.794, y2: 17.653, w: 0.25 },
-        { type: 'trace', x1: 13.716, y1: 14.605, x2: 14.605, y2: 14.605, w: 0.25 },
-        { type: 'trace', x1: 14.605, y1: 14.605, x2: 15.113, y2: 15.113, w: 0.25 },
-        { type: 'trace', x1: 15.113, y1: 15.113, x2: 15.113, y2: 17.78, w: 0.25 },
-        { type: 'trace', x1: 13.589, y1: 13.335, x2: 14.732, y2: 13.335, w: 0.25 },
-        { type: 'trace', x1: 14.732, y1: 13.335, x2: 16.002, y2: 14.732, w: 0.25 },
-        { type: 'trace', x1: 16.002, y1: 14.732, x2: 16.002, y2: 16.256, w: 0.25 },
-        { type: 'trace', x1: 16.002, y1: 16.256, x2: 17.653, y2: 17.78, w: 0.25 },
-        { type: 'trace', x1: 13.589, y1: 12.065, x2: 14.732, y2: 12.065, w: 0.25 },
-        { type: 'trace', x1: 14.732, y1: 12.065, x2: 17.526, y2: 15.113, w: 0.25 },
-        { type: 'trace', x1: 13.716, y1: 10.795, x2: 14.732, y2: 10.795, w: 0.25 },
-        { type: 'trace', x1: 14.732, y1: 10.795, x2: 16.637, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 16.637, y1: 12.7, x2: 17.653, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 13.589, y1: 9.525, x2: 16.764, y2: 9.525, w: 0.25 },
-        { type: 'trace', x1: 16.764, y1: 9.525, x2: 16.891, y2: 9.525, w: 0.25 },
-        { type: 'trace', x1: 16.891, y1: 9.525, x2: 17.653, y2: 10.16, w: 0.25 },
-        { type: 'trace', x1: 13.589, y1: 8.255, x2: 16.891, y2: 8.255, w: 0.25 },
-        { type: 'trace', x1: 16.891, y1: 8.255, x2: 17.653, y2: 7.62, w: 0.25 },
-        { type: 'trace', x1: 13.462, y1: 6.985, x2: 14.859, y2: 6.985, w: 0.25 },
-        { type: 'trace', x1: 14.859, y1: 6.985, x2: 16.764, y2: 5.08, w: 0.25 },
-        { type: 'trace', x1: 16.764, y1: 5.08, x2: 17.78, y2: 5.08, w: 0.25 },
-        { type: 'trace', x1: 13.462, y1: 5.715, x2: 14.859, y2: 5.715, w: 0.25 },
-        { type: 'trace', x1: 14.859, y1: 5.715, x2: 17.78, y2: 2.921, w: 0.25 },
-        { type: 'trace', x1: 13.462, y1: 4.445, x2: 14.732, y2: 4.445, w: 0.25 },
-        { type: 'trace', x1: 14.732, y1: 4.445, x2: 16.129, y2: 3.175, w: 0.25 },
-        { type: 'trace', x1: 16.129, y1: 3.175, x2: 16.129, y2: 1.524, w: 0.25 },
-        { type: 'trace', x1: 16.129, y1: 1.524, x2: 17.653, y2: 0.127, w: 0.25 },
-        { type: 'trace', x1: 13.716, y1: 3.175, x2: 14.605, y2: 3.175, w: 0.25 },
-        { type: 'trace', x1: 14.605, y1: 3.175, x2: 15.113, y2: 2.794, w: 0.25 },
-        { type: 'trace', x1: 15.113, y1: 2.794, x2: 15.113, y2: 0.127, w: 0.25 },
-      ],
-      mask: [
-        { type: 'pad', x: 4.24, y: 14.605, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 13.335, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 12.065, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 10.795, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 9.525, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 8.255, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 6.985, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 5.715, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 4.445, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 4.24, y: 3.175, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 3.175, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 4.445, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 5.715, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 6.985, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 8.255, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 9.525, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 10.795, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 12.065, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 13.335, w: 2.15, h: 0.7 },
-        { type: 'pad', x: 13.54, y: 14.605, w: 2.15, h: 0.7 },
-      ],
-      silk: [
-        { type: 'circle', x: 4, y: 15.5, d: 0.5 },
-          /*{ type: 'poly', points: [
-          { x: 1.6, y: 1.15 }, { x: 6.02, y: 1.15 },
-          { x: 6.02, y: 11.5 }, { x: 1.6, y: 11.5 },
-          { x: 1.6, y: 1.15 },
-         */
-      ],
-    },
-
-    outline: { width: 19.8, height: 19.8 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 8,
-    heightPins: 8,
-    silkLabel: { text: 'SOIC-16/20W', rotation: 90, x: 8.89, y: 8.89, height: 1 },
-  }, 
-
-  // ═══════════════════════════════════════════════════════════════════
-  // MSOP-8  (8 pins, 0.65mm pitch, 3.0mm body)
-  // Grid: 4×4  |  TH pins: col 0 rows 0-3, col 3 rows 0-3
-  // TODO: manually adjust pad positions and routing
-  // ═══════════════════════════════════════════════════════════════════
-  {
-    id: 'msop12',
-    name: 'MSOP-8/10/12',
-    category: 'MSOP',
-    pitch: 2.54,
-    color: '#60c0a0',
-
-    throughPins: [
-      { col: 1, row: 3, label: '1' },
-      { col: 0, row: 3, label: '2' },
-      { col: 0, row: 2, label: '3' },
-      { col: 0, row: 1, label: '4' },
-      { col: 0, row: 0, label: '5' },
-      { col: 1, row: 0, label: '6' },
-      { col: 3, row: 0, label: '7' },
-      { col: 4, row: 0, label: '8' },
-      { col: 4, row: 1, label: '9' },
-      { col: 4, row: 2, label: '10' },
-      { col: 4, row: 3, label: '11' },
-      { col: 3, row: 3, label: '12' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 2.93, y: 5.435, w: 1.45, h: 0.4 },   // Pin 1
-        { type: 'pad', x: 2.93, y: 4.785, w: 1.45, h: 0.4 },   // Pin 2
-        { type: 'pad', x: 2.93, y: 4.135, w: 1.45, h: 0.4 },   // Pin 3
-        { type: 'pad', x: 2.93, y: 3.485, w: 1.45, h: 0.4 },   // Pin 4
-        { type: 'pad', x: 2.93, y: 2.835, w: 1.45, h: 0.4 },   // Pin 5
-        { type: 'pad', x: 2.93, y: 2.185, w: 1.45, h: 0.4 },   // Pin 6
-        { type: 'pad', x: 7.23, y: 2.185, w: 1.45, h: 0.4 },   // Pin 7
-        { type: 'pad', x: 7.23, y: 2.835, w: 1.45, h: 0.4 },   // Pin 8
-        { type: 'pad', x: 7.23, y: 3.485, w: 1.45, h: 0.4 },   // Pin 9
-        { type: 'pad', x: 7.23, y: 4.135, w: 1.45, h: 0.4 },   // Pin 10
-        { type: 'pad', x: 7.23, y: 4.785, w: 1.45, h: 0.4 },   // Pin 11
-        { type: 'pad', x: 7.23, y: 5.435, w: 1.45, h: 0.4 },   // Pin 12
-
-        // Fanout traces
-        { type: 'trace', x1: 2.921, y1: 5.461, x2: 2.413, y2: 5.461, w: 0.25 },
-        { type: 'trace', x1: 2.413, y1: 5.461, x2: 2.413, y2: 7.62, w: 0.25 },
-        { type: 'trace', x1: 2.794, y1: 4.826, x2: 2.032, y2: 4.826, w: 0.25 },
-        { type: 'trace', x1: 2.032, y1: 4.826, x2: 1.651, y2: 5.207, w: 0.25 },
-        { type: 'trace', x1: 1.651, y1: 5.207, x2: 1.651, y2: 6.096, w: 0.25 },
-        { type: 'trace', x1: 1.651, y1: 6.096, x2: 0, y2: 7.62, w: 0.25 },
-        { type: 'trace', x1: 2.794, y1: 4.191, x2: 1.651, y2: 4.191, w: 0.25 },
-        { type: 'trace', x1: 1.651, y1: 4.191, x2: 0.889, y2: 4.953, w: 0.25 },
-        { type: 'trace', x1: 0.889, y1: 4.953, x2: -0.127, y2: 4.953, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 3.429, x2: 1.651, y2: 3.429, w: 0.25 },
-        { type: 'trace', x1: 1.651, y1: 3.429, x2: 0.762, y2: 2.54, w: 0.25 },
-        { type: 'trace', x1: 0.762, y1: 2.54, x2: 0, y2: 2.54, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 2.794, x2: 2.032, y2: 2.794, w: 0.25 },
-        { type: 'trace', x1: 2.032, y1: 2.794, x2: 1.524, y2: 2.286, w: 0.25 },
-        { type: 'trace', x1: 1.524, y1: 2.286, x2: 1.524, y2: 1.27, w: 0.25 },
-        { type: 'trace', x1: 1.524, y1: 1.27, x2: 0, y2: 0, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 2.159, x2: 2.413, y2: 2.159, w: 0.25 },
-        { type: 'trace', x1: 2.413, y1: 2.159, x2: 2.413, y2: -0.127, w: 0.25 },
-        { type: 'trace', x1: 7.112, y1: 2.159, x2: 7.747, y2: 2.159, w: 0.25 },
-        { type: 'trace', x1: 7.747, y1: 2.159, x2: 7.747, y2: 0, w: 0.25 },
-        { type: 'trace', x1: 7.239, y1: 2.794, x2: 8.255, y2: 2.794, w: 0.25 },
-        { type: 'trace', x1: 8.255, y1: 2.794, x2: 8.509, y2: 2.54, w: 0.25 },
-        { type: 'trace', x1: 8.509, y1: 2.54, x2: 8.509, y2: 1.524, w: 0.25 },
-        { type: 'trace', x1: 8.509, y1: 1.524, x2: 10.033, y2: 0.127, w: 0.25 },
-        { type: 'trace', x1: 7.112, y1: 3.429, x2: 8.382, y2: 3.429, w: 0.25 },
-        { type: 'trace', x1: 8.382, y1: 3.429, x2: 9.144, y2: 2.667, w: 0.25 },
-        { type: 'trace', x1: 9.144, y1: 2.667, x2: 10.16, y2: 2.667, w: 0.25 },
-        { type: 'trace', x1: 7.239, y1: 4.191, x2: 8.382, y2: 4.191, w: 0.25 },
-        { type: 'trace', x1: 8.382, y1: 4.191, x2: 9.271, y2: 5.08, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 5.08, x2: 10.033, y2: 5.08, w: 0.25 },
-        { type: 'trace', x1: 7.239, y1: 4.826, x2: 8.128, y2: 4.826, w: 0.25 },
-        { type: 'trace', x1: 8.128, y1: 4.826, x2: 8.509, y2: 5.207, w: 0.25 },
-        { type: 'trace', x1: 8.509, y1: 5.207, x2: 8.509, y2: 6.223, w: 0.25 },
-        { type: 'trace', x1: 8.509, y1: 6.223, x2: 10.033, y2: 7.62, w: 0.25 },
-        { type: 'trace', x1: 7.239, y1: 5.461, x2: 7.747, y2: 5.461, w: 0.25 },
-        { type: 'trace', x1: 7.747, y1: 5.461, x2: 7.747, y2: 7.62, w: 0.25 },
-      ],
-      mask: [
-        { type: 'pad', x: 2.93, y: 5.435, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 2.93, y: 4.785, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 2.93, y: 4.135, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 2.93, y: 3.485, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 2.93, y: 2.835, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 2.93, y: 2.185, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 7.23, y: 2.185, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 7.23, y: 2.835, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 7.23, y: 3.485, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 7.23, y: 4.135, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 7.23, y: 4.785, w: 1.55, h: 0.5 },
-        { type: 'pad', x: 7.23, y: 5.435, w: 1.55, h: 0.5 },
-      ],
-      silk: [
-        { type: 'circle', x: 2.5, y: 6.2, d: 0.5 },
-        /*
-        { type: 'poly', points: [
-          { x: 1.6, y: 1.15 }, { x: 6.02, y: 1.15 },
-          { x: 6.02, y: 6.47 }, { x: 1.6, y: 6.47 },
-          { x: 1.6, y: 1.15 },
-        ]},*/
-      ],
-    },
-
-    outline: { width: 12.2, height: 9.6 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 5,
-    heightPins: 4,
-    silkLabel: { text: 'MSOP-8/12', rotation: 90, x: 5.08, y: 3.81, height: 0.8 },
-  },
-
-  
-  // ═══════════════════════════════════════════════════════════════════
-  // TSSOP-8  (8 pins, 0.65mm pitch, 4.4mm body)
-  // Grid: 4×4  |  TH pins: col 0 rows 0-3, col 3 rows 0-3
-  // TODO: manually adjust pad positions and routing
-  // ═══════════════════════════════════════════════════════════════════   
-    {
-    id: 'tssop8',
-    name: 'TSSOP-8',
-    category: 'TSSOP',
-    pitch: 2.54,
-    color: '#60a0c0',
-
-    throughPins: [
-      { col: 0, row: 3, label: '1' },
-      { col: 0, row: 2, label: '2' },
-      { col: 0, row: 1, label: '3' },
-      { col: 0, row: 0, label: '4' },
-      { col: 4, row: 0, label: '5' },
-      { col: 4, row: 1, label: '6' },
-      { col: 4, row: 2, label: '7' },
-      { col: 4, row: 3, label: '8' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 2.218, y: 4.785, w: 1.475, h: 0.4 },   // Pin 1
-        { type: 'pad', x: 2.218, y: 4.135, w: 1.475, h: 0.4 },   // Pin 2
-        { type: 'pad', x: 2.218, y: 3.485, w: 1.475, h: 0.4 },   // Pin 3
-        { type: 'pad', x: 2.218, y: 2.835, w: 1.475, h: 0.4 },   // Pin 4
-        { type: 'pad', x: 7.943, y: 2.835, w: 1.475, h: 0.4 },   // Pin 5
-        { type: 'pad', x: 7.943, y: 3.485, w: 1.475, h: 0.4 },   // Pin 6
-        { type: 'pad', x: 7.943, y: 4.135, w: 1.475, h: 0.4 },   // Pin 7
-        { type: 'pad', x: 7.943, y: 4.785, w: 1.475, h: 0.4 },   // Pin 8
-
-        // Fanout traces
-        { type: 'trace', x1: 2.159, y1: 4.064, x2: 1.27, y2: 4.064, w: 0.3 },
-        { type: 'trace', x1: 1.27, y1: 4.064, x2: 0.127, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 2.159, y1: 4.826, x2: 1.651, y2: 4.826, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 4.826, x2: 1.651, y2: 6.35, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 6.35, x2: 0.254, y2: 7.62, w: 0.3 },
-        { type: 'trace', x1: 2.159, y1: 3.429, x2: 1.27, y2: 3.429, w: 0.3 },
-        { type: 'trace', x1: 1.27, y1: 3.429, x2: 0.127, y2: 2.54, w: 0.3 },
-        { type: 'trace', x1: 2.159, y1: 2.794, x2: 1.651, y2: 2.794, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 2.794, x2: 1.651, y2: 1.016, w: 0.3 },
-        { type: 'trace', x1: 1.651, y1: 1.016, x2: 0.127, y2: 0, w: 0.3 },
-        { type: 'trace', x1: 8.128, y1: 4.826, x2: 8.509, y2: 4.826, w: 0.3 },
-        { type: 'trace', x1: 8.509, y1: 4.826, x2: 8.509, y2: 6.35, w: 0.3 },
-        { type: 'trace', x1: 8.509, y1: 6.35, x2: 9.906, y2: 7.62, w: 0.3 },
-        { type: 'trace', x1: 8.128, y1: 4.064, x2: 8.89, y2: 4.064, w: 0.3 },
-        { type: 'trace', x1: 8.89, y1: 4.064, x2: 10.16, y2: 5.08, w: 0.3 },
-        { type: 'trace', x1: 8.001, y1: 3.429, x2: 8.89, y2: 3.429, w: 0.3 },
-        { type: 'trace', x1: 8.89, y1: 3.429, x2: 10.16, y2: 2.667, w: 0.3 },
-        { type: 'trace', x1: 8.128, y1: 2.794, x2: 8.509, y2: 2.794, w: 0.3 },
-        { type: 'trace', x1: 8.509, y1: 2.794, x2: 8.509, y2: 1.27, w: 0.3 },
-        { type: 'trace', x1: 8.509, y1: 1.27, x2: 10.16, y2: -0.127, w: 0.3 },
-      ],
-      mask: [
-        { type: 'pad', x: 2.218, y: 4.785, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 2.218, y: 4.135, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 2.218, y: 3.485, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 2.218, y: 2.835, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 7.943, y: 2.835, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 7.943, y: 3.485, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 7.943, y: 4.135, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 7.943, y: 4.785, w: 1.575, h: 0.5 },
-      ],
-      silk: [
-        { type: 'circle', x: 2.1, y: 5.5, d: 0.5 },
-          /*{ type: 'poly', points: [
-          { x: 1.0, y: 1.85 }, { x: 6.62, y: 1.85 },
-          { x: 6.62, y: 5.25 }, { x: 1.0, y: 5.25 },
-          { x: 1.0, y: 1.85 },
-        ]},
-        */
-      ],
-    },
-
-    outline: { width: 12.2, height: 9.6 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 5,
-    heightPins: 4,
-    silkLabel: { text: 'TSSOP-8', rotation: 90, x: 5.08, y: 3.81, height: 0.8 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // TSSOP-16  (16 pins, 0.65mm pitch, 4.4mm body)
-  // Grid: TODO  |  TH pins: TODO
-  // TODO: manually design routing
-  // ═══════════════════════════════════════════════════════════════════
-    {
-    id: 'tssop16',
-    name: 'TSSOP-16',
-    category: 'TSSOP',
-    pitch: 2.54,
-    color: '#60a0c0',
-
-    throughPins: [
-      { col: 1, row: 5, label: '1' },
-      { col: 0, row: 5, label: '2' },
-      { col: 0, row: 4, label: '3' },
-      { col: 0, row: 3, label: '4' },
-      { col: 0, row: 2, label: '5' },
-      { col: 0, row: 1, label: '6' },
-      { col: 0, row: 0, label: '7' },
-      { col: 1, row: 0, label: '8' },
-      { col: 4, row: 0, label: '9' },
-      { col: 5, row: 0, label: '10' },
-      { col: 5, row: 1, label: '11' },
-      { col: 5, row: 2, label: '12' },
-      { col: 5, row: 3, label: '13' },
-      { col: 5, row: 4, label: '14' },
-      { col: 5, row: 5, label: '15' },
-      { col: 4, row: 5, label: '16' },
-    ],
-
-    features: {
-      copper: [
-        // SMD pads
-        { type: 'pad', x: 3.488, y: 8.625, w: 1.475, h: 0.4 },   // Pin 1
-        { type: 'pad', x: 3.488, y: 7.975, w: 1.475, h: 0.4 },   // Pin 2
-        { type: 'pad', x: 3.488, y: 7.325, w: 1.475, h: 0.4 },   // Pin 3
-        { type: 'pad', x: 3.488, y: 6.675, w: 1.475, h: 0.4 },   // Pin 4
-        { type: 'pad', x: 3.488, y: 6.025, w: 1.475, h: 0.4 },   // Pin 5
-        { type: 'pad', x: 3.488, y: 5.375, w: 1.475, h: 0.4 },   // Pin 6
-        { type: 'pad', x: 3.488, y: 4.725, w: 1.475, h: 0.4 },   // Pin 7
-        { type: 'pad', x: 3.488, y: 4.075, w: 1.475, h: 0.4 },   // Pin 8
-        { type: 'pad', x: 9.213, y: 4.075, w: 1.475, h: 0.4 },   // Pin 9
-        { type: 'pad', x: 9.213, y: 4.725, w: 1.475, h: 0.4 },   // Pin 10
-        { type: 'pad', x: 9.213, y: 5.375, w: 1.475, h: 0.4 },   // Pin 11
-        { type: 'pad', x: 9.213, y: 6.025, w: 1.475, h: 0.4 },   // Pin 12
-        { type: 'pad', x: 9.213, y: 6.675, w: 1.475, h: 0.4 },   // Pin 13
-        { type: 'pad', x: 9.213, y: 7.325, w: 1.475, h: 0.4 },   // Pin 14
-        { type: 'pad', x: 9.213, y: 7.975, w: 1.475, h: 0.4 },   // Pin 15
-        { type: 'pad', x: 9.213, y: 8.625, w: 1.475, h: 0.4 },   // Pin 16
-
-        // Fanout traces
-        { type: 'trace', x1: 3.429, y1: 8.636, x2: 2.921, y2: 8.636, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 8.636, x2: 2.921, y2: 11.811, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 11.811, x2: 2.413, y2: 12.573, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 8.636, x2: 9.779, y2: 8.636, w: 0.25 },
-        { type: 'trace', x1: 9.779, y1: 8.636, x2: 9.779, y2: 11.811, w: 0.25 },
-        { type: 'trace', x1: 9.779, y1: 11.811, x2: 10.16, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 3.429, y1: 4.064, x2: 2.921, y2: 4.064, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 4.064, x2: 2.921, y2: 0.889, w: 0.25 },
-        { type: 'trace', x1: 2.921, y1: 0.889, x2: 2.54, y2: 0.127, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 4.064, x2: 9.779, y2: 4.064, w: 0.25 },
-        { type: 'trace', x1: 9.779, y1: 4.064, x2: 9.779, y2: 0.889, w: 0.25 },
-        { type: 'trace', x1: 9.779, y1: 0.889, x2: 10.16, y2: 0.254, w: 0.25 },
-        { type: 'trace', x1: 3.429, y1: 6.604, x2: 1.27, y2: 6.604, w: 0.25 },
-        { type: 'trace', x1: 1.27, y1: 6.604, x2: 0.127, y2: 7.62, w: 0.25 },
-        { type: 'trace', x1: 3.429, y1: 5.969, x2: 1.27, y2: 5.969, w: 0.25 },
-        { type: 'trace', x1: 1.27, y1: 5.969, x2: 0, y2: 5.08, w: 0.25 },
-        { type: 'trace', x1: 3.429, y1: 4.699, x2: 2.286, y2: 4.699, w: 0.25 },
-        { type: 'trace', x1: 2.286, y1: 4.699, x2: 1.905, y2: 4.318, w: 0.25 },
-        { type: 'trace', x1: 1.905, y1: 4.318, x2: 1.905, y2: 1.778, w: 0.25 },
-        { type: 'trace', x1: 1.905, y1: 1.778, x2: 0.127, y2: 0.127, w: 0.25 },
-        { type: 'trace', x1: 3.302, y1: 5.334, x2: 1.905, y2: 5.334, w: 0.25 },
-        { type: 'trace', x1: 1.905, y1: 5.334, x2: 1.27, y2: 4.699, w: 0.25 },
-        { type: 'trace', x1: 1.27, y1: 4.699, x2: 1.27, y2: 3.683, w: 0.25 },
-        { type: 'trace', x1: 1.27, y1: 3.683, x2: 0.127, y2: 2.54, w: 0.25 },
-        { type: 'trace', x1: 3.175, y1: 7.366, x2: 1.905, y2: 7.366, w: 0.25 },
-        { type: 'trace', x1: 1.905, y1: 7.366, x2: 1.397, y2: 7.874, w: 0.25 },
-        { type: 'trace', x1: 1.397, y1: 7.874, x2: 1.397, y2: 9.144, w: 0.25 },
-        { type: 'trace', x1: 1.397, y1: 9.144, x2: 0.254, y2: 10.16, w: 0.25 },
-        { type: 'trace', x1: 3.175, y1: 8.001, x2: 2.54, y2: 8.001, w: 0.25 },
-        { type: 'trace', x1: 2.54, y1: 8.001, x2: 2.159, y2: 8.382, w: 0.25 },
-        { type: 'trace', x1: 2.159, y1: 8.382, x2: 2.159, y2: 10.795, w: 0.25 },
-        { type: 'trace', x1: 2.159, y1: 10.795, x2: 0.127, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 8.001, x2: 10.033, y2: 8.001, w: 0.25 },
-        { type: 'trace', x1: 10.033, y1: 8.001, x2: 10.16, y2: 8.001, w: 0.25 },
-        { type: 'trace', x1: 10.16, y1: 8.001, x2: 10.541, y2: 8.382, w: 0.25 },
-        { type: 'trace', x1: 10.541, y1: 8.382, x2: 10.541, y2: 10.795, w: 0.25 },
-        { type: 'trace', x1: 10.541, y1: 10.795, x2: 12.573, y2: 12.7, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 7.366, x2: 10.541, y2: 7.366, w: 0.25 },
-        { type: 'trace', x1: 10.541, y1: 7.366, x2: 11.303, y2: 8.128, w: 0.25 },
-        { type: 'trace', x1: 11.303, y1: 8.128, x2: 11.303, y2: 9.398, w: 0.25 },
-        { type: 'trace', x1: 11.303, y1: 9.398, x2: 12.319, y2: 10.16, w: 0.25 },
-        { type: 'trace', x1: 9.144, y1: 6.604, x2: 11.811, y2: 6.604, w: 0.25 },
-        { type: 'trace', x1: 11.811, y1: 6.604, x2: 12.573, y2: 7.493, w: 0.25 },
-        { type: 'trace', x1: 9.144, y1: 5.969, x2: 11.811, y2: 5.969, w: 0.25 },
-        { type: 'trace', x1: 11.811, y1: 5.969, x2: 12.7, y2: 5.207, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 5.334, x2: 10.795, y2: 5.334, w: 0.25 },
-        { type: 'trace', x1: 10.795, y1: 5.334, x2: 11.43, y2: 4.826, w: 0.25 },
-        { type: 'trace', x1: 11.43, y1: 4.826, x2: 11.43, y2: 3.683, w: 0.25 },
-        { type: 'trace', x1: 11.43, y1: 3.683, x2: 12.573, y2: 2.54, w: 0.25 },
-        { type: 'trace', x1: 9.271, y1: 4.699, x2: 10.16, y2: 4.699, w: 0.25 },
-        { type: 'trace', x1: 10.16, y1: 4.699, x2: 10.795, y2: 4.191, w: 0.25 },
-        { type: 'trace', x1: 10.795, y1: 4.191, x2: 10.795, y2: 1.778, w: 0.25 },
-        { type: 'trace', x1: 10.795, y1: 1.778, x2: 12.7, y2: 0.127, w: 0.25 },
-      ],
-      mask: [
-        { type: 'pad', x: 3.488, y: 8.625, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 3.488, y: 7.975, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 3.488, y: 7.325, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 3.488, y: 6.675, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 3.488, y: 6.025, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 3.488, y: 5.375, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 3.488, y: 4.725, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 3.488, y: 4.075, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 4.075, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 4.725, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 5.375, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 6.025, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 6.675, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 7.325, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 7.975, w: 1.575, h: 0.5 },
-        { type: 'pad', x: 9.213, y: 8.625, w: 1.575, h: 0.5 },
-      ],
-      silk: [
-        { type: 'circle', x: 3.2, y: 9.5, d: 0.5 },
-          /*{ type: 'poly', points: [
-          { x: 1.0, y: 1.85 }, { x: 6.62, y: 1.85 },
-          { x: 6.62, y: 5.25 }, { x: 1.0, y: 5.25 },
-          { x: 1.0, y: 1.85 },
-        ]},
-        */
-      ],
-    },
-
-    outline: { width: 14.7, height: 14.7 },
-    outlineOffset: { x: 0, y: 0 },
-    widthPins: 6,
-    heightPins: 6,
-    silkLabel: { text: 'TSSOP-16', rotation: 90, x: 6.35, y: 6.35, height: 0.8 },
-  },   
 ];
 
+function uniqPitches(values) {
+  const out = [];
+  for (const value of values) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) continue;
+    if (!out.some(existing => Math.abs(existing - num) < 0.0001)) out.push(num);
+  }
+  return out;
+}
+
+export function getVariableSubgridPitches(basePitch) {
+  const normalizedBasePitch = Number(basePitch) > 0 ? Number(basePitch) : 2.54;
+  return uniqPitches([
+    normalizedBasePitch,
+    ...(normalizedBasePitch >= 2.54 - 0.0001 ? [2.54] : []),
+    ...(normalizedBasePitch >= 2.00 - 0.0001 ? [2.00] : []),
+    ...(normalizedBasePitch >= 1.27 - 0.0001 ? [1.27] : []),
+  ]);
+}
+
+export function isAdapterCompatibleWithPitch(adapter, pitch) {
+  if (!adapter) return false;
+  if (adapter.id === VARIABLE_SUBGRID_ADAPTER_ID) return true;
+  return adapter.pitch === pitch;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Adapter Registration
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Register a single external adapter definition into ADAPTER_LIBRARY.
+ *
+ * The adapter object must follow the same structure as entries in ADAPTER_LIBRARY.
+ * Required fields: id, name, category, features, throughPins, widthPins, heightPins, outline.
+ *
+ * @param {object} adapterDef - Adapter definition object.
+ */
+export function registerAdapter(adapterDef) {
+  if (!adapterDef || typeof adapterDef.id !== 'string') {
+    throw new Error('registerAdapter: adapter must have a string id');
+  }
+  if (ADAPTER_LIBRARY.some(a => a.id === adapterDef.id)) {
+    console.warn(`registerAdapter: adapter '${adapterDef.id}' is already registered – skipping.`);
+    return;
+  }
+  ADAPTER_LIBRARY.push(adapterDef);
+}
+
+/**
+ * Register multiple external adapter definitions at once.
+ *
+ * @param {object[]} adapterDefs - Array of adapter definition objects.
+ */
+export function registerAdapters(adapterDefs) {
+  if (!Array.isArray(adapterDefs)) {
+    throw new Error('registerAdapters: argument must be an array');
+  }
+  adapterDefs.forEach(registerAdapter);
+}
+
+/**
+ * Load and register adapter definitions from a URL (e.g. public/assets/adapters/library.json).
+ * The JSON may contain a single adapter object or an array of adapter objects.
+ * Silently skips if the URL returns a non-OK response (e.g. file not present on server).
+ *
+ * @param {string} url
+ * @returns {Promise<number>} Number of newly registered adapters.
+ */
+export async function loadAdaptersFromUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) return 0;
+  const data = await res.json();
+  const defs = Array.isArray(data) ? data : [data];
+  const before = ADAPTER_LIBRARY.length;
+  registerAdapters(defs);
+  return ADAPTER_LIBRARY.length - before;
+}
+
+/**
+ * Load and register adapter definitions from a user-uploaded File object.
+ * The JSON may contain a single adapter object or an array of adapter objects.
+ *
+ * @param {File} file
+ * @returns {Promise<number>} Number of newly registered adapters.
+ */
+export async function loadAdaptersFromFile(file) {
+  const text = await file.text();
+  const data = JSON.parse(text);
+  const defs = Array.isArray(data) ? data : [data];
+  const before = ADAPTER_LIBRARY.length;
+  registerAdapters(defs);
+  return ADAPTER_LIBRARY.length - before;
+}
+
+// 1. Build-time: JSON-Dateien aus src/assets/adapters/ (zur Build-Zeit gebündelt)
+{
+  const modules = import.meta.glob('../assets/adapters/*.json', { eager: true });
+  const defs = Object.values(modules).flatMap(m => {
+    const data = /** @type {any} */ (m).default ?? m;
+    return Array.isArray(data) ? data : [data];
+  });
+  registerAdapters(defs);
+}
+
+// 2. Runtime: optionale Server-Bibliothek aus public/assets/adapters/library.json
+//loadAdaptersFromUrl(`${adapterOverlayBasePath}/library.json`);
 
 // ═══════════════════════════════════════════════════════════════════
 // Helper Functions
@@ -1316,6 +435,131 @@ export function getAdapter(adapterId) {
   return ADAPTER_LIBRARY.find(a => a.id === adapterId) || null;
 }
 
+export function getAdapterForInstance(inst) {
+  const adapter = getRotatedAdapter(inst.adapterId, inst.rotation || 0);
+  if (!adapter) return null;
+
+  if (adapter.id !== VARIABLE_SUBGRID_ADAPTER_ID) {
+    const optionalFeatures = /** @type {any} */ (adapter).optionalFeatures;
+    if (inst.showOptionalFeatures && optionalFeatures) {
+      const opt = optionalFeatures;
+      return {
+        ...adapter,
+        features: {
+          copper:    [...(adapter.features?.copper    || []), ...(opt.copper    || [])],
+          copperBack:[...( adapter.features?.copperBack|| []), ...(opt.copperBack|| [])],
+          mask:      [...(adapter.features?.mask      || []), ...(opt.mask      || [])],
+          silk:      [...(adapter.features?.silk      || []), ...(opt.silk      || [])],
+          silkText:  [...(adapter.features?.silkText  || []), ...(opt.silkText  || [])],
+          drills:    [...(adapter.features?.drills    || []), ...(opt.drills    || [])],
+        },
+      };
+    }
+    return adapter;
+  }
+
+  const widthPins = Math.max(1, Math.round(inst.widthPins || adapter.widthPins || 4));
+  const heightPins = Math.max(1, Math.round(inst.heightPins || adapter.heightPins || 4));
+  const basePitch = Number(inst.pitch) > 0 ? Number(inst.pitch) : adapter.pitch;
+  const supportedPitches = getVariableSubgridPitches(basePitch);
+  const fallbackPitch = supportedPitches[0] || adapter.subGridPitches?.[0] || 2.00;
+  const fallbackProfile = getPitchProfile(fallbackPitch);
+  const fallbackPad = fallbackProfile.padSize;
+  const fallbackDrill = fallbackProfile.drillSize;
+  const maskExpansion = 0.05;
+
+  const subGridPitch = Number(inst.subGridPitch) > 0 ? Number(inst.subGridPitch) : fallbackPitch;
+  const subProfile = getPitchProfile(subGridPitch);
+  const requestedPadSize = Number(inst.subPadSize) > 0 ? Number(inst.subPadSize) : subProfile.padSize;
+  const subPadSize = Math.max(0.25, Math.min(requestedPadSize, Math.max(0.25, subGridPitch - 0.15)));
+  const subDrillSize = Number(inst.subGridDrill) > 0.1 ? Number(inst.subGridDrill) : subProfile.drillSize;
+  const subPadShape = VARIABLE_SUBGRID_PAD_SHAPES.includes(inst.subPadShape) ? inst.subPadShape : 'square';
+  const subgridPads = buildSubgridPads({
+    widthPins,
+    heightPins,
+    pitch: basePitch,
+    subGridPitch,
+    subPadSize,
+    subPadShape,
+    throughPins: adapter.throughPins,
+  });
+
+  const subgridMask = buildSubgridMask({
+    widthPins,
+    heightPins,
+    pitch: basePitch,
+    subGridPitch,
+    subPadSize,
+    subPadShape,
+    maskExpansion,
+    throughPins: adapter.throughPins,
+  });
+
+  const subgridDrills = buildSubgridDrills({
+    widthPins,
+    heightPins,
+    pitch: basePitch,
+    subGridPitch,
+    subDrillSize,
+    subPadShape,
+    throughPins: adapter.throughPins,
+  });
+
+  return {
+    ...adapter,
+    widthPins,
+    heightPins,
+    pitch: basePitch,
+    subGridPitch,
+    subPadSize,
+    subPadShape,
+    outline: {
+      width: Math.max(2.5, (widthPins - 1) * basePitch + 1.6),
+      height: Math.max(2.5, (heightPins - 1) * basePitch + 1.6),
+    },
+    features: {
+      copper: subgridPads,
+      copperBack: subgridPads,
+      mask: subgridMask,
+      silk: [],
+      silkText: [],
+      drills: subgridDrills,
+    },
+  };
+}
+
+export function cycleVariableSubgridPitch(inst) {
+  if (!inst || inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) return inst;
+
+  const pitches = getVariableSubgridPitches(inst.pitch);
+  if (!Array.isArray(pitches) || pitches.length === 0) return inst;
+
+  const currentPitch = Number(inst.subGridPitch ?? pitches[0]);
+  const currentIndex = pitches.findIndex(pitch => Math.abs(pitch - currentPitch) < 0.0001);
+  const nextIndex = currentIndex >= 0
+    ? (currentIndex + 1) % pitches.length
+    : 0;
+
+  const nextPitch = pitches[nextIndex];
+  const profile = getPitchProfile(nextPitch);
+  return {
+    ...inst,
+    subGridPitch: nextPitch,
+    subPadSize: profile.padSize,
+    subGridDrill: profile.drillSize,
+  };
+}
+
+export function cycleVariableSubgridPadShape(inst) {
+  if (!inst || inst.adapterId !== VARIABLE_SUBGRID_ADAPTER_ID) return inst;
+  const currentIndex = Math.max(0, VARIABLE_SUBGRID_PAD_SHAPES.indexOf(inst.subPadShape));
+  const nextIndex = (currentIndex + 1) % VARIABLE_SUBGRID_PAD_SHAPES.length;
+  return {
+    ...inst,
+    subPadShape: VARIABLE_SUBGRID_PAD_SHAPES[nextIndex],
+  };
+}
+
 /**
  * Get a rotated copy of an adapter definition.
  * Rotation: 0=0°, 1=90° CW, 2=180°, 3=270° CW.
@@ -1325,7 +569,7 @@ export function getAdapter(adapterId) {
  * Rotation center = middle of the widthPins × heightPins grid rectangle.
  */
 export function getRotatedAdapter(adapterId, rotation = 0) {
-  const adapter = ADAPTER_LIBRARY.find(a => a.id === adapterId);
+  const adapter = getAllAdapters().find(a => a.id === adapterId);
   if (!adapter) return null;
 
   const r = ((rotation % 4) + 4) % 4;
@@ -1370,7 +614,11 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
   function rotFeature(f) {
     if (f.type === 'pad') {
       const p = rotPt(f.x, f.y);
-      return { type: 'pad', x: p.x, y: p.y, w: swap ? f.h : f.w, h: swap ? f.w : f.h };
+      // Add adapter rotation to pad rotation; RoundRect macro handles orientation natively
+      const padRot = ((f.rotation || 0) + r * 90) % 360;
+      // Normalize to 0-180° range (rectangular pads have 180° symmetry)
+      const normRot = padRot % 180;
+      return { type: 'pad', x: p.x, y: p.y, w: f.w, h: f.h, rotation: normRot || undefined };
     } else if (f.type === 'trace') {
       const p1 = rotPt(f.x1, f.y1);
       const p2 = rotPt(f.x2, f.y2);
@@ -1380,20 +628,38 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
       return { type: 'circle', x: p.x, y: p.y, d: f.d };
     } else if (f.type === 'poly') {
       return { type: 'poly', points: f.points.map(pt => rotPt(pt.x, pt.y)) };
+    } else if (f.type === 'text') {
+      const p = rotPt(f.x, f.y);
+      const baseRot = f.rotation || 0;
+      // Add adapter rotation (r × 90°), then normalize for readability:
+      // Text at 180° or 270° is upside-down/mirrored, flip to 0° or 90°
+      let textRot = (baseRot + r * 90) % 360;
+      if (textRot >= 180) textRot -= 180;
+      return { ...f, x: p.x, y: p.y, rotation: textRot };
     }
+
     return f;
   }
 
   // Rotate silkLabel position if present
-  // Label text rotation toggles between base and base+90° on each adapter rotation step
   let silkLabel = adapter.silkLabel;
   if (silkLabel) {
     const p = rotPt(silkLabel.x, silkLabel.y);
     const baseRot = silkLabel.rotation || 0;
-    // Each 90° adapter rotation toggles the label orientation
-    const labelRot = (r % 2 === 0) ? baseRot : (baseRot === 90 ? 0 : 90);
-    silkLabel = { ...silkLabel, x: p.x, y: p.y, rotation: labelRot };
+    let textRot = (baseRot + r * 90) % 360;
+    if (textRot >= 180) textRot -= 180;
+    silkLabel = { ...silkLabel, x: p.x, y: p.y, rotation: textRot };
   }
+
+  const srcOpt = /** @type {any} */ (adapter).optionalFeatures;
+  const rotatedOptionalFeatures = srcOpt ? {
+    copper:    srcOpt.copper    ? srcOpt.copper.map(rotFeature)    : undefined,
+    copperBack:srcOpt.copperBack? srcOpt.copperBack.map(rotFeature): undefined,
+    drills:    srcOpt.drills    ? srcOpt.drills.map(d => { const p = rotPt(d.x, d.y); return { ...d, x: p.x, y: p.y }; }) : undefined,
+    mask:      srcOpt.mask      ? srcOpt.mask.map(rotFeature)      : undefined,
+    silk:      srcOpt.silk      ? srcOpt.silk.map(rotFeature)      : undefined,
+    silkText:  srcOpt.silkText  ? srcOpt.silkText.map(rotFeature)  : undefined,
+  } : undefined;
 
   return {
     ...adapter,
@@ -1401,9 +667,16 @@ export function getRotatedAdapter(adapterId, rotation = 0) {
     silkLabel,
     features: {
       copper: adapter.features.copper.map(rotFeature),
+      copperBack: adapter.features.copperBack ? adapter.features.copperBack.map(rotFeature) : undefined,
+      drills: adapter.features.drills ? adapter.features.drills.map(d => {
+        const p = rotPt(d.x, d.y);
+        return { ...d, x: p.x, y: p.y };
+      }) : undefined,
       mask: adapter.features.mask.map(rotFeature),
-      silk: adapter.features.silk.map(rotFeature),
+      silk: adapter.features.silk ? adapter.features.silk.map(rotFeature) : undefined,
+      silkText: adapter.features.silkText ? adapter.features.silkText.map(rotFeature) : undefined,
     },
+    ...(rotatedOptionalFeatures ? { optionalFeatures: rotatedOptionalFeatures } : {}),
   };
 }
 
@@ -1439,5 +712,104 @@ export function getAdapterFeatures(adapter, inst, gridLeft, gridBottom, pitch) {
     copper: adapter.features.copper.map(offsetFeature),
     mask: adapter.features.mask.map(offsetFeature),
     silk: adapter.features.silk.map(offsetFeature),
+    silkText: adapter.features.silkText.map(offsetFeature),
   };
+}
+
+function round4(value) {
+  return Math.round(value * 10000) / 10000;
+}
+
+function buildSubgridPads({ widthPins, heightPins, pitch, subGridPitch, subPadSize, subPadShape, throughPins = [] }) {
+  const pads = [];
+  const endX = (widthPins - 1) * pitch;
+  const endY = (heightPins - 1) * pitch;
+  const thKeepout = 1.4;
+
+  for (let x = 0; x <= endX + 1e-9; x += subGridPitch) {
+    for (let y = 0; y <= endY + 1e-9; y += subGridPitch) {
+      const rx = round4(x);
+      const ry = round4(y);
+      const blocked = throughPins.some(pin => {
+        const tx = pin.col * pitch;
+        const ty = pin.row * pitch;
+        return Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout;
+      });
+      if (!blocked) {
+        pads.push(subPadShape === 'circle'
+          ? { type: 'circle', x: rx, y: ry, d: subPadSize }
+          : { type: 'pad', x: rx, y: ry, w: subPadSize, h: subPadSize });
+      }
+    }
+  }
+
+  return pads;
+}
+
+function buildSubgridMask({ widthPins, heightPins, pitch, subGridPitch, subPadSize, subPadShape, maskExpansion, throughPins = [] }) {
+  const pads = [];
+  const endX = (widthPins - 1) * pitch;
+  const endY = (heightPins - 1) * pitch;
+  const thKeepout = 1.4;
+
+  for (let x = 0; x <= endX + 1e-9; x += subGridPitch) {
+    for (let y = 0; y <= endY + 1e-9; y += subGridPitch) {
+      const rx = round4(x);
+      const ry = round4(y);
+      const blocked = throughPins.some(pin => {
+        const tx = pin.col * pitch;
+        const ty = pin.row * pitch;
+        return Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout;
+      });
+      if (!blocked) {
+        const maskSize = subPadSize + 2 * maskExpansion;
+        pads.push(subPadShape === 'circle'
+          ? { type: 'circle', x: rx, y: ry, d: maskSize }
+          : { type: 'pad', x: rx, y: ry, w: maskSize, h: maskSize });
+      }
+    }
+  }
+
+  return pads;
+}
+
+function buildSubgridDrills({ widthPins, heightPins, pitch, subGridPitch, subDrillSize, subPadShape = 'square', throughPins = [] }) {
+  const drills = [];
+  const endX = (widthPins - 1) * pitch;
+  const endY = (heightPins - 1) * pitch;
+  const thKeepout = 1.4;
+
+  for (let x = 0; x <= endX + 1e-9; x += subGridPitch) {
+    for (let y = 0; y <= endY + 1e-9; y += subGridPitch) {
+      const rx = round4(x);
+      const ry = round4(y);
+      const blocked = throughPins.some(pin => {
+        const tx = pin.col * pitch;
+        const ty = pin.row * pitch;
+        return Math.abs(rx - tx) < thKeepout && Math.abs(ry - ty) < thKeepout;
+      });
+      if (!blocked && subPadShape !== 'square-smd') drills.push({ type: 'via', x: rx, y: ry, drill: subDrillSize, size: subDrillSize });
+    }
+  }
+
+  return drills;
+}
+
+ /**
+ * Get overlay image URL for a module, or null if none configured.
+ * @param {object} adp - Module definition from ADAPTER_LIBRARY
+ * @returns {string|null} URL to PNG overlay
+ */
+export function getAdapterOverlayUrl(adp) {
+  if (!adp || !adp.overlay) return null;
+  const filename = typeof adp.overlay === 'string' ? adp.overlay : `${adp.id}.png`;
+  return `${adapterOverlayBasePath}/${filename}`;
+}
+
+/**
+ * Set the base path for module overlay PNGs (e.g. for WordPress deployment).
+ * @param {string} path - Base path without trailing slash
+ */
+export function setAdapterOverlayBasePath(path) {
+  adapterOverlayBasePath = path;
 }

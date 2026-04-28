@@ -8,6 +8,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #1a1a2e; overflow: hidden; }
 </style>
+<link rel="icon" type="image/png" href="assets/gridgen_icon.png" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
@@ -17,7 +18,15 @@
 <script type="text/babel">
 const { useState, useRef, useCallback, useEffect, useMemo } = React;
 
-const GRID = 2.54;
+const BASE_GRID_OPTIONS = [2.54, 2.00, 1.27];
+const DEFAULT_BASE_GRID = 2.54;
+
+const BASE_PITCH_PROFILES = {
+  '2.54': { pitch: 2.54, padSize: 1.6, drillSize: 1.0, defineSuffix: '2_54' },
+  '2': { pitch: 2.0, padSize: 1.4, drillSize: 0.9, defineSuffix: '2_00' },
+  '1.27': { pitch: 1.27, padSize: 1.0, drillSize: 0.6, defineSuffix: '1_27' },
+};
+
 const COLORS = {
   bg: "#1a1a2e", gridDot: "#334", gridDotTH: "#f08040", gridDotTHInner: "#a04020",
   smdPad: "#e8a030", smdPadStroke: "#c08020", trace: "#40d8d8", tracePreview: "#40d8d880",
@@ -27,18 +36,68 @@ const COLORS = {
 };
 
 const DEFAULT_ADAPTER = {
-  id: "soic8", name: "SOIC-8", category: "SOIC",
+  id: "ic-id", name: "New IC", category: "Not Set",
+  meta: { author: "", license: "", source: "" },
   widthPins: 4, heightPins: 4,
-  originOffset: { x: 0, y: 0 },
-  smdPads: [], traces: [], throughPins: [], silkBody: null,
+  originOffset: { x: 0, y: 0, rot: 0 },
+  smdPads: [], traces: [], throughPins: [], silkBody: null, silkLines: [], silkText: [],
+  silkLabel: { x: 0, y: -1.5, show: false, height: 1.0 },
 };
 
+function extractSExprBlocks(source, head) {
+  const blocks = [];
+  let pos = 0;
+  while ((pos = source.indexOf(head, pos)) !== -1) {
+    let depth = 0;
+    let end = pos;
+    for (; end < source.length; end++) {
+      if (source[end] === '(') depth++;
+      else if (source[end] === ')') {
+        depth--;
+        if (depth === 0) { end++; break; }
+      }
+    }
+    blocks.push(source.slice(pos, end));
+    pos = end;
+  }
+  return blocks;
+}
+
 function parseKicadMod(text) {
-  const pads = [], silkLines = [];
+  const topPads = [], bottomPads = [], vias = [], silkLines = [];
   let bodyPoly = null, m;
-  const padRegex = /\(pad\s+"(\d+)"\s+smd\s+\w+\s*\n?\s*\(at\s+([-\d.]+)\s+([-\d.]+)\)\s*\n?\s*\(size\s+([-\d.]+)\s+([-\d.]+)\)/g;
-  while ((m = padRegex.exec(text)) !== null) {
-    pads.push({ pin: parseInt(m[1]), x: parseFloat(m[2]), y: parseFloat(m[3]), w: parseFloat(m[4]), h: parseFloat(m[5]) });
+
+  const padBlocks = extractSExprBlocks(text.replace(/\r/g, ""), "(pad ");
+  for (const block of padBlocks) {
+    const header = block.match(/^\(pad\s+"([^"]*)"\s+(\w+)\s+(\w+)/);
+    const at = block.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+    const size = block.match(/\(size\s+([-\d.]+)\s+([-\d.]+)\)/);
+    if (!header || !at || !size) continue;
+
+    const layerExpr = block.match(/\(layers\s+([^)]*)\)/);
+    const quotedLayers = layerExpr ? [...layerExpr[1].matchAll(/"([^"]+)"/g)].map(s => s[1]) : [];
+    const bareLayers = layerExpr ? layerExpr[1].replace(/"[^"]+"/g, "").trim().split(/\s+/).filter(Boolean) : [];
+    const layers = [...quotedLayers, ...bareLayers];
+
+    const drillMatch = block.match(/\(drill\s+([-\d.]+)/);
+    const pad = {
+      pin: header[1] || "",
+      type: header[2],
+      shape: header[3],
+      x: parseFloat(at[1]),
+      y: parseFloat(at[2]),
+      rotation: parseFloat(at[3] || 0),
+      w: parseFloat(size[1]),
+      h: parseFloat(size[2]),
+      drill: drillMatch ? parseFloat(drillMatch[1]) : 0,
+      layers,
+    };
+
+    if (layers.includes("F.Cu") || layers.includes("*.Cu")) topPads.push(pad);
+    if (layers.includes("B.Cu") || layers.includes("*.Cu")) bottomPads.push(pad);
+    if ((pad.type === "thru_hole" || pad.type === "np_thru_hole") && pad.drill > 0) {
+      vias.push({ x: pad.x, y: pad.y, size: roundTo(Math.max(pad.w, pad.h), 3), drill: roundTo(pad.drill, 3) });
+    }
   }
   const fabPolyRegex = /\(fp_poly\s*\n?\s*\(pts\s*\n?\s*([\s\S]*?)\)[\s\S]*?\(layer\s+"F\.Fab"\)/;
   const polyMatch = fabPolyRegex.exec(text);
@@ -48,15 +107,368 @@ function parseKicadMod(text) {
     while ((m = ptRegex.exec(polyMatch[1])) !== null) points.push({ x: parseFloat(m[1]), y: parseFloat(m[2]) });
     if (points.length > 2) bodyPoly = points;
   }
-  return { pads, silkLines, bodyPoly };
+  return { topPads, bottomPads, vias, silkLines, bodyPoly };
 }
+
+/**
+ * Parse KiCad .kicad_pcb file. Extracts pads (from footprints), traces, vias,
+ * and silkscreen lines on F.SilkS
+ * on F.Cu and B.Cu, with board-relative coordinates (Y-down KiCad convention).
+ */
+function parseKicadPcb(text) {
+  text = text.replace(/\r/g, "");
+
+  // 1) Find board outline from Edge.Cuts gr_line/gr_rect
+  let boardLeft = Infinity, boardTop = Infinity, boardRight = -Infinity, boardBottom = -Infinity;
+  // Look for gr_line on Edge.Cuts
+  const grLineRe = /\(gr_line\s+\(start\s+([\d.]+)\s+([\d.]+)\)\s+\(end\s+([\d.]+)\s+([\d.]+)\)[\s\S]*?\(layer\s+"Edge\.Cuts"\)/g;
+  let m;
+  while ((m = grLineRe.exec(text)) !== null) {
+    for (const v of [parseFloat(m[1]), parseFloat(m[3])]) { boardLeft = Math.min(boardLeft, v); boardRight = Math.max(boardRight, v); }
+    for (const v of [parseFloat(m[2]), parseFloat(m[4])]) { boardTop = Math.min(boardTop, v); boardBottom = Math.max(boardBottom, v); }
+  }
+  if (boardLeft === Infinity) return { error: "No board outline found on Edge.Cuts" };
+
+  const boardW = roundTo(boardRight - boardLeft, 4);
+  const boardH = roundTo(boardBottom - boardTop, 4);
+
+  // 2) Extract pads from footprints with absolute coordinates
+  const fcuPads = [], bcuPads = [];
+  for (const fpBlock of extractSExprBlocks(text, "(footprint ")) {
+    const nameMatch = fpBlock.match(/^\(footprint\s+"([^"]+)"/);
+    if (!nameMatch) continue;
+    const fpName = nameMatch[1].split(":").pop();
+
+    const atMatch = fpBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+    if (!atMatch) continue;
+    const fx = parseFloat(atMatch[1]), fy = parseFloat(atMatch[2]);
+    const fDeg = parseFloat(atMatch[3] || 0);
+    const fRad = -fDeg * Math.PI / 180;  // negate: KiCad Y-down CW → standard CCW formula
+    const cosR = Math.cos(fRad), sinR = Math.sin(fRad);
+
+    for (const padBlock of extractSExprBlocks(fpBlock, "(pad ")) {
+      const header = padBlock.match(/^\(pad\s+"([^"]*)"\s+(\w+)\s+(\w+)/);
+      const padAt = padBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+      const size = padBlock.match(/\(size\s+([-\d.]+)\s+([-\d.]+)\)/);
+      if (!header || !padAt || !size) continue;
+
+      const pin = header[1], ptype = header[2], pshape = header[3];
+      const px = parseFloat(padAt[1]), py = parseFloat(padAt[2]);
+      const pDeg = parseFloat(padAt[3] || 0);
+      const sw = parseFloat(size[1]), sh = parseFloat(size[2]);
+      const drillMatch = padBlock.match(/\(drill\s+([-\d.]+)/);
+      const drill = drillMatch ? parseFloat(drillMatch[1]) : 0;
+
+      const layerExpr = padBlock.match(/\(layers\s+([^)]*)\)/);
+      const quotedLayers = layerExpr ? [...layerExpr[1].matchAll(/"([^"]+)"/g)].map(s => s[1]) : [];
+      const bareLayers = layerExpr ? layerExpr[1].replace(/"[^"]+"/g, "").trim().split(/\s+/).filter(Boolean) : [];
+      const layers = [...quotedLayers, ...bareLayers];
+
+      // Absolute position: rotate pad pos by footprint rotation (KiCad CW Y-down)
+      const ax = fx + px * cosR - py * sinR;
+      const ay = fy + px * sinR + py * cosR;
+
+      // Pad rotation: absolute = pad local + footprint rotation, normalize to 0-180°
+      const norm = (360 -pDeg) % 360;
+      const padRotation = roundTo(norm % 180,1);
+      //const absRot = ((pDeg + fDeg) % 360 + 360) % 360;
+      //const padRotation = roundTo(absRot % 180, 1);
+
+      // Board-relative coords (Y still KiCad-down at this point)
+      const rx = roundTo(ax - boardLeft, 4);
+      const ry = roundTo(ay - boardTop, 4);
+
+      const padData = { pin, fp: fpName, type: ptype, shape: pshape, x: rx, y: ry, w: roundTo(sw,4), h: roundTo(sh,4), drill, rotation: padRotation > 0.5 ? padRotation : 0 };
+
+      if (ptype === "thru_hole" || ptype === "np_thru_hole" || (layers.includes("F.Cu") && layers.includes("B.Cu")) || layers.includes("*.Cu")) {
+        fcuPads.push(padData);
+        bcuPads.push(padData);
+      } else if (layers.includes("F.Cu")) {
+        fcuPads.push(padData);
+      } else if (layers.includes("B.Cu")) {
+        bcuPads.push(padData);
+      }
+    }
+  }
+
+  // 3) Segments (traces)
+  const fcuTraces = [], bcuTraces = [];
+  const segRe = /\(segment\s+\(start\s+([\d.]+)\s+([\d.]+)\)\s+\(end\s+([\d.]+)\s+([\d.]+)\)\s+\(width\s+([\d.]+)\)\s+\(layer\s+"([^"]+)"\)\s+\(net\s+(\d+)\)/g;
+  while ((m = segRe.exec(text)) !== null) {
+    const t = {
+      x1: roundTo(parseFloat(m[1]) - boardLeft, 4),
+      y1: roundTo(parseFloat(m[2]) - boardTop, 4),
+      x2: roundTo(parseFloat(m[3]) - boardLeft, 4),
+      y2: roundTo(parseFloat(m[4]) - boardTop, 4),
+      w: parseFloat(m[5]),
+      net: parseInt(m[7]),
+    };
+    if (m[6] === "F.Cu") fcuTraces.push(t);
+    else if (m[6] === "B.Cu") bcuTraces.push(t);
+  }
+
+  // 4) Vias
+  const vias = [];
+  const viaRe = /\(via\s+\(at\s+([\d.]+)\s+([\d.]+)\)\s+\(size\s+([\d.]+)\)\s+\(drill\s+([\d.]+)\)/g;
+  while ((m = viaRe.exec(text)) !== null) {
+    vias.push({
+      x: roundTo(parseFloat(m[1]) - boardLeft, 4),
+      y: roundTo(parseFloat(m[2]) - boardTop, 4),
+      size: parseFloat(m[3]),
+      drill: parseFloat(m[4]),
+    });
+  }
+
+  // 5) Silkscreen (F.SilkS)
+  const silkLines = [];
+  const silkText = [];
+
+  const grSilkLineRe = /\(gr_line\s+\(start\s+([-\d.]+)\s+([-\d.]+)\)\s+\(end\s+([-\d.]+)\s+([-\d.]+)\)[\s\S]*?\(layer\s+"F\.SilkS"\)/g;
+  while ((m = grSilkLineRe.exec(text)) !== null) {
+    silkLines.push({
+      x1: roundTo(parseFloat(m[1]) - boardLeft, 4),
+      y1: roundTo(parseFloat(m[2]) - boardTop, 4),
+      x2: roundTo(parseFloat(m[3]) - boardLeft, 4),
+      y2: roundTo(parseFloat(m[4]) - boardTop, 4),
+    });
+  }
+
+  const fpSilkLineRe = /\(fp_line\s+\(start\s+([-\d.]+)\s+([-\d.]+)\)\s+\(end\s+([-\d.]+)\s+([-\d.]+)\)[\s\S]*?\(layer\s+"F\.SilkS"\)/g;
+  const fpSilkRectRe = /\(fp_rect\s+\(start\s+([-\d.]+)\s+([-\d.]+)\)\s+\(end\s+([-\d.]+)\s+([-\d.]+)\)[\s\S]*?\(layer\s+"F\.SilkS"\)/g;
+
+  const addSilkLine = (lx1, ly1, lx2, ly2, fx, fy, cosR, sinR) => {
+    const x1 = fx + lx1 * cosR - ly1 * sinR;
+    const y1 = fy + lx1 * sinR + ly1 * cosR;
+    const x2 = fx + lx2 * cosR - ly2 * sinR;
+    const y2 = fy + lx2 * sinR + ly2 * cosR;
+    silkLines.push({ x1: roundTo(x1 - boardLeft, 4), y1: roundTo(y1 - boardTop, 4), x2: roundTo(x2 - boardLeft, 4), y2: roundTo(y2 - boardTop, 4) });
+  };
+
+  for (const fpBlock of extractSExprBlocks(text, "(footprint ")) {
+    const nameMatch = fpBlock.match(/^\(footprint\s+"([^"]+)"/);
+    if (!nameMatch) continue;
+    const fpName = nameMatch[1].split(":").pop();
+
+    const atMatch = fpBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+    if (!atMatch) continue;
+    const fx = parseFloat(atMatch[1]), fy = parseFloat(atMatch[2]);
+    const fDeg = parseFloat(atMatch[3] || 0);
+    const fRad = -fDeg * Math.PI / 180;  // negate: KiCad Y-down CW → standard CCW formula
+    const cosR = Math.cos(fRad), sinR = Math.sin(fRad);
+
+    // fp_line silkscreen
+    let sm;
+    fpSilkLineRe.lastIndex = 0;
+    while ((sm = fpSilkLineRe.exec(fpBlock)) !== null) {
+      addSilkLine(parseFloat(sm[1]), parseFloat(sm[2]), parseFloat(sm[3]), parseFloat(sm[4]), fx, fy, cosR, sinR);
+    }
+
+    // fp_rect silkscreen (expand to 4 lines)
+    let rm;
+    fpSilkRectRe.lastIndex = 0;
+    while ((rm = fpSilkRectRe.exec(fpBlock)) !== null) {
+      const x1 = parseFloat(rm[1]), y1 = parseFloat(rm[2]), x2 = parseFloat(rm[3]), y2 = parseFloat(rm[4]);
+      addSilkLine(x1, y1, x2, y1, fx, fy, cosR, sinR);
+      addSilkLine(x2, y1, x2, y2, fx, fy, cosR, sinR);
+      addSilkLine(x2, y2, x1, y2, fx, fy, cosR, sinR);
+      addSilkLine(x1, y2, x1, y1, fx, fy, cosR, sinR);
+    }
+
+    const addSilkTextEntry = (txt, tx, ty, tRot, fontH) => {
+      const absX = fx + tx * cosR - ty * sinR;
+      const absY = fy + tx * sinR + ty * cosR;
+      const absRot = ((fDeg + tRot) % 360 + 360) % 360;
+      silkText.push({ text: txt, fp: fpName, x: roundTo(absX - boardLeft, 4), y: roundTo(absY - boardTop, 4), height: roundTo(fontH, 4), rotation: roundTo(absRot, 2) });
+    };
+
+    // Older KiCad syntax: (fp_text reference "R1" ...)
+    const fpRefTextRe = /\(fp_text\s+reference\s+"([^"]+)"\s+\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)[\s\S]*?\(layer\s+"F\.SilkS"\)[\s\S]*?\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/g;
+    let tm;
+    while ((tm = fpRefTextRe.exec(fpBlock)) !== null) {
+      addSilkTextEntry(tm[1], parseFloat(tm[2]), parseFloat(tm[3]), parseFloat(tm[4] || 0), parseFloat(tm[6]));
+    }
+
+    // KiCad v7+ syntax: (property "Reference" ...)
+    for (const propBlock of extractSExprBlocks(fpBlock, '(property "Reference"')) {
+      if (!/\(layer\s+"F\.SilkS"\)/.test(propBlock)) continue;
+      const nameM = propBlock.match(/^\(property\s+"Reference"\s+"([^"]+)"/);
+      const propAt = propBlock.match(/\(at\s+([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+))?\)/);
+      if (!nameM || !propAt) continue;
+      const propFont = propBlock.match(/\(effects\s+\(font\s+\(size\s+([-\d.]+)\s+([-\d.]+)\)/);
+      const fontH = propFont ? parseFloat(propFont[2]) : 1;
+      addSilkTextEntry(nameM[1], parseFloat(propAt[1]), parseFloat(propAt[2]), parseFloat(propAt[3] || 0), fontH);
+    }
+  }
+
+  // 6) Nets
+  const nets = {};
+  const netRe = /\(net\s+(\d+)\s+"([^"]*)"\)/g;
+  while ((m = netRe.exec(text)) !== null) {
+    nets[parseInt(m[1])] = m[2];
+  }
+
+  return {
+    boardW, boardH, boardLeft, boardTop,
+    fcuPads, bcuPads,
+    fcuTraces, bcuTraces,
+    vias, nets, silkLines, silkText,
+  };
+}
+
+  function rotatePointAroundOrigin(point, rotationDeg) {
+    const rad = rotationDeg * Math.PI / 180;
+    const cosR = Math.cos(rad);
+    const sinR = Math.sin(rad);
+    return {
+      x: roundTo(point.x * cosR - point.y * sinR, 4),
+      y: roundTo(point.x * sinR + point.y * cosR, 4),
+    };
+  }
+
+  function rotateTraceSegments(segments, rotationDeg) {
+    return segments.map(seg => {
+      const p1 = rotatePointAroundOrigin({ x: seg.x1, y: seg.y1 }, rotationDeg);
+      const p2 = rotatePointAroundOrigin({ x: seg.x2, y: seg.y2 }, rotationDeg);
+      return { ...seg, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+    });
+  }
+
+  function normalizeRotation(rotationDeg) {
+    return roundTo(((rotationDeg % 360) + 360) % 360, 1);
+  }
+
+  function applyFootprintRotationToImport(imported, rotationDeg) {
+    if (!rotationDeg) return imported;
+
+    const rotateWithPadRotation = (pad) => {
+      const point = rotatePointAroundOrigin({ x: pad.x, y: pad.y }, rotationDeg);
+      const originalRotation = pad.rotation || 0;
+      return {
+        ...pad,
+        x: point.x,
+        y: point.y,
+        rotation: normalizeRotation(originalRotation + rotationDeg),
+      };
+    };
+
+    return {
+      ...imported,
+      smdPads: (imported.smdPads || []).map(rotateWithPadRotation),
+      bottomPads: (imported.bottomPads || []).map(rotateWithPadRotation),
+      topTraces: (imported.topTraces || []).map(t => ({ ...t, segments: rotateTraceSegments(t.segments || [], rotationDeg) })),
+      bottomTraces: (imported.bottomTraces || []).map(t => ({ ...t, segments: rotateTraceSegments(t.segments || [], rotationDeg) })),
+      vias: (imported.vias || []).map(v => {
+        const point = rotatePointAroundOrigin({ x: v.x, y: v.y }, rotationDeg);
+        return { ...v, x: point.x, y: point.y };
+      }),
+      silkBody: imported.silkBody ? imported.silkBody.map(p => rotatePointAroundOrigin(p, rotationDeg)) : imported.silkBody,
+      silkLines: (imported.silkLines || []).map(s => {
+        const p1 = rotatePointAroundOrigin({ x: s.x1, y: s.y1 }, rotationDeg);
+        const p2 = rotatePointAroundOrigin({ x: s.x2, y: s.y2 }, rotationDeg);
+        return { ...s, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+      }),
+      silkText: (imported.silkText || []).map(t => {
+        const point = rotatePointAroundOrigin({ x: t.x, y: t.y }, rotationDeg);
+        return {
+          ...t,
+          x: point.x,
+          y: point.y,
+          rotation: normalizeRotation((t.rotation || 0) + rotationDeg),
+        };
+      }),
+    };
+  }
+
+/**
+ * Convert parsed KiCad PCB data to adapter editor format.
+ * KiCad Y-down is flipped to editor Y-up.
+ */
+function kicadPcbToAdapter(parsed) {
+  if (parsed.error) return null;
+  const { boardW, boardH, fcuPads, bcuPads, fcuTraces, bcuTraces, vias, nets, silkLines, silkText } = parsed;
+
+  // Flip Y: editor uses Y-up, KiCad uses Y-down. newY = boardH - oldY
+  const flipY = (y) => roundTo(boardH - y, 4);
+
+  // KiCad CW rotation in Y-down becomes CCW in Y-up after flip — matches Gerber convention directly
+  const toPad = (p, i) => ({
+    pin: parseInt(p.pin) || (i + 1),
+    x: p.x, y: flipY(p.y),
+    w: p.w, h: p.h,
+    rotation: -p.rotation || 0,
+    fp: p.fp, netPin: p.pin,
+  });
+
+  // F.Cu SMD pads only (thru_hole handled separately as drills)
+  const smdPads = fcuPads.filter(p => p.type !== 'thru_hole').map(toPad);
+
+  // B.Cu SMD pads
+  const bottomPads = bcuPads.filter(p => p.type !== 'thru_hole').map(toPad);
+
+  // Thru_hole pads become drill entries (vias)
+  const thruHoleDrills = fcuPads
+    .filter(p => p.type === 'thru_hole' && p.drill > 0)
+    .map(p => ({
+      x: p.x, y: flipY(p.y),
+      size: roundTo(Math.max(p.w, p.h), 3),
+      drill: roundTo(p.drill, 3),
+    }));
+
+  // Convert F.Cu traces
+  const topTraces = fcuTraces.map(t => ({
+    segments: [{ x1: t.x1, y1: flipY(t.y1), x2: t.x2, y2: flipY(t.y2), w: t.w }],
+    layer: "F.Cu", net: t.net,
+  }));
+
+  // Convert B.Cu traces
+  const bottomTraces = bcuTraces.map(t => ({
+    segments: [{ x1: t.x1, y1: flipY(t.y1), x2: t.x2, y2: flipY(t.y2), w: t.w }],
+    layer: "B.Cu", net: t.net,
+  }));
+
+  // Convert vias + thru_hole pads
+  const editorVias = [
+    ...vias.map(v => ({ x: v.x, y: flipY(v.y), size: v.size, drill: v.drill })),
+    ...thruHoleDrills,
+  ];
+
+  const editorSilkLines = silkLines.map(s => ({
+    x1: s.x1,
+    y1: flipY(s.y1),
+    x2: s.x2,
+    y2: flipY(s.y2),
+  }));
+
+  const editorSilkText = silkText.map(t => ({
+    text: t.text,
+    x: t.x,
+    y: flipY(t.y),
+    height: t.height,
+    rotation: t.rotation,
+    fp: t.fp,
+  }));
+
+  return {
+    smdPads,
+    bottomPads,
+    topTraces,
+    bottomTraces,
+    vias: editorVias,
+    silkLines: editorSilkLines,
+    silkText: editorSilkText,
+    boardW, boardH,
+    nets,
+  };
+}
+
 
 function roundTo(val, dec = 4) { return Math.round(val * 10 ** dec) / 10 ** dec; }
 
-const ZOOM_LEVELS = [6, 8, 10, 14, 18, 24, 32, 40, 50];
+const ZOOM_LEVELS = [6, 8, 10, 14, 18, 24, 32, 40, 50, 60, 70, 80];
 
 function AdapterEditor() {
   const [adapter, setAdapter] = useState(DEFAULT_ADAPTER);
+  const [baseGrid, setBaseGrid] = useState(DEFAULT_BASE_GRID);
   const [zoom, setZoom] = useState(4);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [tool, setTool] = useState("select");
@@ -64,6 +476,7 @@ function AdapterEditor() {
   const [traceWidth, setTraceWidth] = useState(0.3);
   const [mousePos, setMousePos] = useState(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
+  const [snap45, setSnap45] = useState(false);
   const [snapSmall, setSnapSmall] = useState(true);
   const [selectedTrace, setSelectedTrace] = useState(null);
   const [selectedPad, setSelectedPad] = useState(null);
@@ -71,10 +484,31 @@ function AdapterEditor() {
   const [importText, setImportText] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [maskExpansion, setMaskExpansion] = useState(0.05);
+  const [bottomPads, setBottomPads] = useState([]);
+  const [bottomTraces, setBottomTraces] = useState([]);
+  const [vias, setVias] = useState([]);
+  const [showLayer, setShowLayer] = useState("both"); // "F.Cu", "B.Cu", "both"
+  const [basePitchKey, setBasePitchKey] = useState('2.54');
   const svgRef = useRef(null);
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
   const pxPerMm = ZOOM_LEVELS[zoom] || 18;
+  const [interfacePinPad, setInterfacePinPad] = useState(BASE_PITCH_PROFILES['2.54'].padSize);
+  const [interfacePinDrill, setInterfacePinDrill] = useState(BASE_PITCH_PROFILES['2.54'].drillSize);
+  const [showJsonSelect, setShowJsonSelect] = useState(false);
+  const [jsonSelectOptions, setJsonSelectOptions] = useState([]);
+  const jsonFileInputRef = useRef(null);
+  const [selectedSilkLabel, setSelectedSilkLabel] = useState(false);
+  const isDraggingSilkLabel = useRef(false);
+  const didDragSilkLabel = useRef(false);
+  const dragSilkLabelStart = useRef(null);
+  const isDraggingSilkText = useRef(false);
+  const dragSilkTextStart = useRef(null);
+  const [selectedBottomPad, setSelectedBottomPad] = useState(null);
+  const [selectedBottomTrace, setSelectedBottomTrace] = useState(null);
+  const [selectedVia, setSelectedVia] = useState(null);
+  const [selectedSilkLine, setSelectedSilkLine] = useState(null);
+  const [selectedSilkText, setSelectedSilkText] = useState(null);
 
   const toScreen = useCallback((x, y) => ({
     sx: x * pxPerMm + panOffset.x,
@@ -87,10 +521,19 @@ function AdapterEditor() {
   }), [pxPerMm, panOffset]);
 
   const snapWorld = useCallback((wx, wy) => {
-    if (snapToGrid) return { x: roundTo(Math.round(wx / GRID) * GRID, 4), y: roundTo(Math.round(wy / GRID) * GRID, 4) };
+    if (snapToGrid) return { x: roundTo(Math.round(wx / baseGrid) * baseGrid, 4), y: roundTo(Math.round(wy / baseGrid) * baseGrid, 4) };
     if (snapSmall) { const s = 0.127; return { x: roundTo(Math.round(wx / s) * s, 4), y: roundTo(Math.round(wy / s) * s, 4) }; }
     return { x: roundTo(wx, 3), y: roundTo(wy, 3) };
-  }, [snapToGrid, snapSmall]);
+  }, [snapToGrid, snapSmall, baseGrid]);
+
+  const constrainTo45 = useCallback((wx, wy, fromX, fromY) => {
+    const dx = wx - fromX, dy = wy - fromY;
+    if (dx === 0 && dy === 0) return { x: wx, y: wy };
+    const angle = Math.atan2(dy, dx);
+    const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return { x: roundTo(fromX + dist * Math.cos(snappedAngle), 3), y: roundTo(fromY + dist * Math.sin(snappedAngle), 3) };
+  }, []);
 
   const handleWheel = useCallback((e) => {
     e.preventDefault();
@@ -109,6 +552,35 @@ function AdapterEditor() {
       isPanning.current = true;
       panStart.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
       e.preventDefault();
+    } else if (e.button === 0 && tool === 'select' && selectedSilkLabel && adapter.silkLabel?.show) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (rect) {
+        const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+        const w = toWorld(sx, sy);
+        const lp = transformPoint(adapter.silkLabel.x, adapter.silkLabel.y);
+        const fontH = adapter.silkLabel.height || 1;
+        const approxHalfW = adapter.name.length * fontH * 0.3 + 0.5;
+        if (Math.abs(w.x - lp.x) < approxHalfW && Math.abs(w.y - lp.y) < fontH + 0.3) {
+          isDraggingSilkLabel.current = true;
+          didDragSilkLabel.current = false;
+          dragSilkLabelStart.current = { wx: w.x, wy: w.y, lx: adapter.silkLabel.x, ly: adapter.silkLabel.y };
+        }
+      }
+    } else if (e.button === 0 && tool === 'select' && selectedSilkText !== null) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (rect) {
+        const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+        const w = toWorld(sx, sy);
+        const t = adapter.silkText[selectedSilkText];
+        if (t) {
+          const tp = transformPoint(t.x, t.y);
+          const fh = t.height || 1;
+          if (Math.abs(w.x - tp.x) < t.text.length * fh * 0.3 + 0.5 && Math.abs(w.y - tp.y) < fh + 0.3) {
+            isDraggingSilkText.current = true;
+            dragSilkTextStart.current = { wx: w.x, wy: w.y, lx: t.x, ly: t.y };
+          }
+        }
+      }
     }
   };
 
@@ -118,34 +590,75 @@ function AdapterEditor() {
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     if (isPanning.current) { setPanOffset({ x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y }); return; }
     const w = toWorld(sx, sy);
-    setMousePos({ screen: { sx, sy }, world: w, snapped: snapWorld(w.x, w.y) });
+    if (isDraggingSilkLabel.current && dragSilkLabelStart.current) {
+      const dx = w.x - dragSilkLabelStart.current.wx;
+      const dy = w.y - dragSilkLabelStart.current.wy;
+      didDragSilkLabel.current = true;
+      setAdapter(a => ({ ...a, silkLabel: { ...a.silkLabel, x: roundTo(dragSilkLabelStart.current.lx + dx, 3), y: roundTo(dragSilkLabelStart.current.ly + dy, 3) } }));
+    } else if (isDraggingSilkText.current && dragSilkTextStart.current) {
+      const dx = w.x - dragSilkTextStart.current.wx;
+      const dy = w.y - dragSilkTextStart.current.wy;
+      setAdapter(a => { const st = [...a.silkText]; st[selectedSilkText] = { ...st[selectedSilkText], x: roundTo(dragSilkTextStart.current.lx + dx, 3), y: roundTo(dragSilkTextStart.current.ly + dy, 3) }; return { ...a, silkText: st }; });
+    }
+    const snapped = snapWorld(w.x, w.y);
+    const last = tracePoints.length > 0 ? tracePoints[tracePoints.length - 1] : null;
+    const effectiveSnapped = (snap45 && last) ? constrainTo45(snapped.x, snapped.y, last.x, last.y) : snapped;
+    setMousePos({ screen: { sx, sy }, world: w, snapped: effectiveSnapped });
   };
 
-  const handleMouseUp = () => { isPanning.current = false; };
+  const handleMouseUp = () => { isPanning.current = false; isDraggingSilkLabel.current = false; isDraggingSilkText.current = false; };
 
   const finishTrace = useCallback(() => {
     if (tracePoints.length >= 2) {
       const segments = [];
       for (let i = 0; i < tracePoints.length - 1; i++) {
-        segments.push({ x1: tracePoints[i].x, y1: tracePoints[i].y, x2: tracePoints[i + 1].x, y2: tracePoints[i + 1].y, w: traceWidth });
+        const p1 = inverseTransformPoint(tracePoints[i].x, tracePoints[i].y);
+        const p2 = inverseTransformPoint(tracePoints[i + 1].x, tracePoints[i + 1].y);
+        segments.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, w: traceWidth });
       }
       setAdapter(a => ({ ...a, traces: [...a.traces, { segments }] }));
     }
     setTracePoints([]);
-  }, [tracePoints, traceWidth]);
+  }, [tracePoints, traceWidth, inverseTransformPoint]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === "Escape") { setTracePoints([]); setTool("select"); }
+    if (e.key === "Escape") {
+      if (tool === "trace" && tracePoints.length > 0) { setTracePoints([]); } // abort trace drawing, stay in trace mode
+      else { setTracePoints([]); setTool("select"); setSelectedSilkLabel(false); setSelectedBottomPad(null); setSelectedBottomTrace(null); setSelectedVia(null); setSelectedSilkLine(null); setSelectedSilkText(null); }
+    }
     else if (e.key === "Enter") finishTrace();
     else if (e.key === "Delete" || e.key === "Backspace") {
       if (selectedTrace !== null) { setAdapter(a => ({ ...a, traces: a.traces.filter((_, i) => i !== selectedTrace) })); setSelectedTrace(null); }
+      else if (selectedPad !== null) { setAdapter(a => ({ ...a, smdPads: a.smdPads.filter((_, i) => i !== selectedPad) })); setSelectedPad(null); }
+      else if (selectedBottomPad !== null) { setBottomPads(p => p.filter((_, i) => i !== selectedBottomPad)); setSelectedBottomPad(null); }
+      else if (selectedBottomTrace !== null) { setBottomTraces(t => t.filter((_, i) => i !== selectedBottomTrace)); setSelectedBottomTrace(null); }
+      else if (selectedVia !== null) { setVias(v => v.filter((_, i) => i !== selectedVia)); setSelectedVia(null); }
+      else if (selectedSilkLine !== null) { setAdapter(a => ({ ...a, silkLines: a.silkLines.filter((_, i) => i !== selectedSilkLine) })); setSelectedSilkLine(null); }
+      else if (selectedSilkText !== null) { setAdapter(a => ({ ...a, silkText: a.silkText.filter((_, i) => i !== selectedSilkText) })); setSelectedSilkText(null); }
     }
-    else if (e.key === "t") setTool(t => t === "trace" ? "select" : "trace");
+    else if (selectedSilkLabel && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+      e.preventDefault();
+      const step = e.shiftKey ? 0.127 : 0.5;
+      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      const dy = e.key === "ArrowUp" ? step : e.key === "ArrowDown" ? -step : 0;
+      setAdapter(a => ({ ...a, silkLabel: { ...a.silkLabel, x: roundTo(a.silkLabel.x + dx, 3), y: roundTo(a.silkLabel.y + dy, 3) } }));
+    }
+    else if (selectedSilkText !== null && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+      e.preventDefault();
+      const step = e.shiftKey ? 0.127 : 0.5;
+      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      const dy = e.key === "ArrowUp" ? step : e.key === "ArrowDown" ? -step : 0;
+      setAdapter(a => { const st = [...a.silkText]; st[selectedSilkText] = { ...st[selectedSilkText], x: roundTo(st[selectedSilkText].x + dx, 3), y: roundTo(st[selectedSilkText].y + dy, 3) }; return { ...a, silkText: st }; });
+    }
+    else if (e.key === "v") { setTool("select"); setTracePoints([]); }
+    else if (e.key === "t") { setTool("trace"); setTracePoints([]); }
+    else if (e.key === "p") { setTool("edit-pins"); setTracePoints([]); }
     else if (e.key === "g") { setSnapToGrid(s => !s); setSnapSmall(false); }
     else if (e.key === "s") { setSnapSmall(s => !s); setSnapToGrid(false); }
+    else if (e.key === "a") { setSnap45(s => !s); }
     else if (e.key === "z" && e.ctrlKey) setAdapter(a => ({ ...a, traces: a.traces.slice(0, -1) }));
-  }, [finishTrace, selectedTrace]);
+  }, [finishTrace, tool, tracePoints, selectedTrace, selectedPad, selectedBottomPad, selectedBottomTrace, selectedVia, selectedSilkLine, selectedSilkText, selectedSilkLabel]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -155,17 +668,38 @@ function AdapterEditor() {
   useEffect(() => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const cx = (adapter.widthPins - 1) * GRID / 2;
-    const cy = (adapter.heightPins - 1) * GRID / 2;
+    const cx = (adapter.widthPins - 1) * baseGrid / 2;
+    const cy = (adapter.heightPins - 1) * baseGrid / 2;
     setPanOffset({ x: rect.width / 2 - cx * pxPerMm, y: rect.height / 2 + cy * pxPerMm });
-  }, [adapter.widthPins, adapter.heightPins, pxPerMm]);
+  }, [adapter.widthPins, adapter.heightPins, pxPerMm, baseGrid]);
 
   const doImport = () => {
     const parsed = parseKicadMod(importText);
-    if (parsed.pads.length === 0) return;
-    const pads = parsed.pads.map(p => ({ pin: p.pin, x: roundTo(p.x, 3), y: roundTo(-p.y, 3), w: roundTo(p.w, 3), h: roundTo(p.h, 3) }));
-    const body = parsed.bodyPoly ? parsed.bodyPoly.map(p => ({ x: roundTo(p.x, 3), y: roundTo(-p.y, 3) })) : null;
-    setAdapter(a => ({ ...a, smdPads: pads, silkBody: body, traces: [] }));
+    if (parsed.topPads.length === 0 && parsed.bottomPads.length === 0) return;
+
+    const toEditorPad = (p, idx) => ({
+      pin: parseInt(p.pin) || (idx + 1),
+      x: roundTo(p.x, 3),
+      y: roundTo(-p.y, 3),
+      rotation: p.rotation ? roundTo(-p.rotation, 1) : 0,
+      w: roundTo(p.w, 3),
+      h: roundTo(p.h, 3),
+    });
+    const imported = {
+      smdPads: parsed.topPads.map(toEditorPad),
+      bottomPads: parsed.bottomPads.map(toEditorPad),
+      silkBody: parsed.bodyPoly ? parsed.bodyPoly.map(p => ({ x: roundTo(p.x, 3), y: roundTo(-p.y, 3) })) : null,
+      silkLines: [],
+      silkText: [],
+      topTraces: [],
+      bottomTraces: [],
+      vias: parsed.vias.map(v => ({ x: roundTo(v.x, 3), y: roundTo(-v.y, 3), size: v.size, drill: v.drill })),
+    };
+    const rotated = applyFootprintRotationToImport(imported, adapter.originOffset.rot || 0);
+    setAdapter(a => ({ ...a, meta: { ...(a.meta || {}), source: "Imported from KiCad" }, smdPads: rotated.smdPads, silkBody: rotated.silkBody, silkLines: rotated.silkLines, silkText: rotated.silkText, traces: rotated.topTraces.map(t => ({ ...t, applyOriginOffset: true })) }));
+    setBottomTraces(rotated.bottomTraces);
+    setBottomPads(rotated.bottomPads || []);
+    setVias(rotated.vias);
     setShowImport(false);
   };
 
@@ -177,38 +711,264 @@ function AdapterEditor() {
     reader.readAsText(file);
   };
 
-  const generateCode = useMemo(() => {
-    const { id, name, category, widthPins, heightPins, smdPads, traces, throughPins, originOffset, silkBody } = adapter;
-    const ox = originOffset.x, oy = originOffset.y;
-    let c = `  {\n    id: '${id}',\n    name: '${name}',\n    category: '${category}',\n    pitch: 2.54,\n    color: '#a060c0',\n\n`;
-    c += `    throughPins: [\n`;
-    throughPins.forEach(tp => { c += `      { col: ${tp.col}, row: ${tp.row}, label: '${tp.label}' },\n`; });
-    c += `    ],\n\n    features: {\n      copper: [\n        // SMD pads\n`;
-    smdPads.forEach(p => { c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${p.w}, h: ${p.h} },   // Pin ${p.pin}\n`; });
-    c += `\n        // Fanout traces\n`;
-    traces.forEach(t => { t.segments.forEach(s => { c += `        { type: 'trace', x1: ${roundTo(s.x1, 4)}, y1: ${roundTo(s.y1, 4)}, x2: ${roundTo(s.x2, 4)}, y2: ${roundTo(s.y2, 4)}, w: ${s.w} },\n`; }); });
-    c += `      ],\n      mask: [\n`;
-    smdPads.forEach(p => { c += `        { type: 'pad', x: ${roundTo(p.x + ox, 4)}, y: ${roundTo(p.y + oy, 4)}, w: ${roundTo(p.w + maskExpansion * 2, 4)}, h: ${roundTo(p.h + maskExpansion * 2, 4)} },\n`; });
-    c += `      ],\n      silk: [\n`;
+  const loadJsonAdapter = useCallback((obj) => {
+    const newBaseGrid = obj.pitch || DEFAULT_BASE_GRID;
+    const pitchKey = String(newBaseGrid);
+    const profile = BASE_PITCH_PROFILES[pitchKey] || BASE_PITCH_PROFILES['2.54'];
+
+    const newSmdPads = (obj.features?.copper || [])
+      .filter(e => e.type === 'pad')
+      .map((p, i) => ({ pin: i + 1, x: p.x, y: p.y, w: p.w, h: p.h, rotation: p.rotation || 0 }));
+
+    const newTraces = (obj.features?.copper || [])
+      .filter(e => e.type === 'trace')
+      .map(t => ({ segments: [{ x1: t.x1, y1: t.y1, x2: t.x2, y2: t.y2, w: t.w }], applyOriginOffset: false }));
+
+    const newBottomPads = (obj.features?.copperBack || [])
+      .filter(e => e.type === 'pad')
+      .map((p, i) => ({ pin: i + 1, x: p.x, y: p.y, w: p.w, h: p.h, rotation: p.rotation || 0 }));
+
+    const newBottomTraces = (obj.features?.copperBack || [])
+      .filter(e => e.type === 'trace')
+      .map(t => ({ segments: [{ x1: t.x1, y1: t.y1, x2: t.x2, y2: t.y2, w: t.w }], applyOriginOffset: false }));
+
+    const newVias = (obj.features?.drills || []).map(d => ({ x: d.x, y: d.y, size: d.size, drill: d.drill }));
+
+    const silkItems = obj.features?.silk || [];
+    let newSilkBody = null;
+    const newSilkLines = [];
+    silkItems.forEach(s => {
+      if (s.type === 'poly' && s.points) {
+        if (s.points.length > 2) {
+          // Schlusspunkt entfernen (wird beim Export dupliziert)
+          newSilkBody = s.points.slice(0, -1);
+        } else if (s.points.length === 2) {
+          newSilkLines.push({ x1: s.points[0].x, y1: s.points[0].y, x2: s.points[1].x, y2: s.points[1].y });
+        }
+      }
+      // Kreise (Pin-1-Marker) werden automatisch regeneriert – nicht laden
+    });
+
+    const newSilkText = (obj.features?.silkText || []).map(t => ({
+      text: t.text, x: t.x, y: t.y, height: t.height || 1, rotation: t.rotation || 0,
+    }));
+
+    setBaseGrid(newBaseGrid);
+    setBasePitchKey(pitchKey);
+    setInterfacePinPad(profile.padSize);
+    setInterfacePinDrill(profile.drillSize);
+    setBottomPads(newBottomPads);
+    setBottomTraces(newBottomTraces);
+    setVias(newVias);
+    setAdapter({
+      id: obj.id || 'ic-id',
+      name: obj.name || 'New IC',
+      meta: { author: obj.meta?.author || "", license: obj.meta?.license || "", source: obj.meta?.source || "" },
+      category: obj.category || 'Not Set',
+      widthPins: obj.widthPins || 4,
+      heightPins: obj.heightPins || 4,
+      originOffset: { x: 0, y: 0, rot: 0 },
+      smdPads: newSmdPads,
+      traces: newTraces,
+      throughPins: (obj.throughPins || []).map(tp => ({ col: tp.col, row: tp.row, label: tp.label })),
+      silkBody: newSilkBody,
+      silkLines: newSilkLines,
+      silkText: newSilkText,
+      silkLabel: obj.silkLabel
+        ? { x: obj.silkLabel.x || 0, y: obj.silkLabel.y || -1.5, height: obj.silkLabel.height || 1.0, show: true }
+        : DEFAULT_ADAPTER.silkLabel,
+    });
+    setShowJsonSelect(false);
+  }, []);
+
+  const handleOpenJson = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        const list = Array.isArray(parsed) ? parsed : [parsed];
+        if (list.length === 1) {
+          loadJsonAdapter(list[0]);
+        } else {
+          setJsonSelectOptions(list);
+          setShowJsonSelect(true);
+        }
+      } catch (err) {
+        alert('Error loading JSON file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const transformPoint = useCallback((x, y) => {
+    const rot = adapter.originOffset.rot || 0;
+    const ox = adapter.originOffset.x || 0;
+    const oy = adapter.originOffset.y || 0;
+    if (!rot) return { x: x + ox, y: y + oy };
+    const rad = rot * Math.PI / 180;
+    const cosR = Math.cos(rad);
+    const sinR = Math.sin(rad);
+    return {
+      x: x * cosR - y * sinR + ox,
+      y: x * sinR + y * cosR + oy,
+    };
+  }, [adapter.originOffset.rot, adapter.originOffset.x, adapter.originOffset.y]);
+
+  const transformRotation = useCallback((rot = 0) => {
+    const out = roundTo((rot || 0) + (adapter.originOffset.rot || 0), 2);
+    return Math.abs(out) < 0.01 ? 0 : out;
+  }, [adapter.originOffset.rot]);
+
+  const inverseTransformPoint = useCallback((x, y) => {
+    const rot = adapter.originOffset.rot || 0;
+    const ox = adapter.originOffset.x || 0;
+    const oy = adapter.originOffset.y || 0;
+    const dx = x - ox, dy = y - oy;
+    if (!rot) return { x: roundTo(dx, 3), y: roundTo(dy, 3) };
+    const rad = -rot * Math.PI / 180;
+    const cosR = Math.cos(rad), sinR = Math.sin(rad);
+    return { x: roundTo(dx * cosR - dy * sinR, 3), y: roundTo(dx * sinR + dy * cosR, 3) };
+  }, [adapter.originOffset.rot, adapter.originOffset.x, adapter.originOffset.y]);
+
+  const transformTracePoint = useCallback((trace, x, y) => {
+    return transformPoint(x, y);
+  }, [transformPoint]);
+
+  const generateJson = useMemo(() => {
+    const { id, name, category, widthPins, heightPins, smdPads, traces, throughPins, silkBody, silkLines, silkText } = adapter;
+
+    const copper = [];
+    smdPads.forEach(p => {
+      const pos = transformPoint(p.x, p.y);
+      const rot = transformRotation(p.rotation || 0);
+      const pad = { type: 'pad', x: roundTo(pos.x, 4), y: roundTo(pos.y, 4), w: p.w, h: p.h };
+      if (rot) pad.rotation = rot;
+      copper.push(pad);
+    });
+    traces.forEach(t => { t.segments.forEach(s => {
+      const p1 = transformTracePoint(t, s.x1, s.y1);
+      const p2 = transformTracePoint(t, s.x2, s.y2);
+      copper.push({ type: 'trace', x1: roundTo(p1.x, 4), y1: roundTo(p1.y, 4), x2: roundTo(p2.x, 4), y2: roundTo(p2.y, 4), w: s.w });
+    }); });
+
+    const mask = smdPads.map(p => {
+      const pos = transformPoint(p.x, p.y);
+      const rot = transformRotation(p.rotation || 0);
+      const pad = { type: 'pad', x: roundTo(pos.x, 4), y: roundTo(pos.y, 4), w: roundTo(p.w + maskExpansion * 2, 4), h: roundTo(p.h + maskExpansion * 2, 4) };
+      if (rot) pad.rotation = rot;
+      return pad;
+    });
+
+    const silk = [];
     if (silkBody && silkBody.length > 2) {
-      c += `        { type: 'poly', points: [\n`;
-      silkBody.forEach(pt => { c += `          { x: ${roundTo(pt.x + ox, 4)}, y: ${roundTo(pt.y + oy, 4)} },\n`; });
-      c += `          { x: ${roundTo(silkBody[0].x + ox, 4)}, y: ${roundTo(silkBody[0].y + oy, 4)} },\n        ]},\n`;
+      const points = silkBody.map(pt => { const p = transformPoint(pt.x, pt.y); return { x: roundTo(p.x, 4), y: roundTo(p.y, 4) }; });
+      points.push({ x: points[0].x, y: points[0].y });
+      silk.push({ type: 'poly', points });
     }
+    silkLines.forEach(s => {
+      const p1 = transformPoint(s.x1, s.y1);
+      const p2 = transformPoint(s.x2, s.y2);
+      silk.push({ type: 'poly', points: [{ x: roundTo(p1.x, 4), y: roundTo(p1.y, 4) }, { x: roundTo(p2.x, 4), y: roundTo(p2.y, 4) }] });
+    });
     if (smdPads.length > 0) {
       const p1 = smdPads[0];
-      c += `        { type: 'circle', x: ${roundTo(p1.x + ox - 0.3, 4)}, y: ${roundTo(p1.y + oy + 0.5, 4)}, d: 0.25 },\n`;
+      const marker = transformPoint(p1.x - 0.3, p1.y + 0.5);
+      silk.push({ type: 'circle', x: roundTo(marker.x, 4), y: roundTo(marker.y, 4), d: 0.25 });
     }
-    c += `      ],\n    },\n\n`;
-    c += `    outline: { width: ${roundTo((widthPins - 1) * GRID + 2, 1)}, height: ${roundTo((heightPins - 1) * GRID + 2, 1)} },\n`;
-    c += `    outlineOffset: { x: 0, y: 0 },\n    widthPins: ${widthPins},\n    heightPins: ${heightPins},\n  },`;
-    return c;
-  }, [adapter, maskExpansion]);
+
+    const features = { copper, mask, silk };
+
+    if (bottomPads.length > 0 || bottomTraces.length > 0) {
+      const copperBack = [];
+      bottomPads.forEach(p => {
+        const pos = transformPoint(p.x, p.y);
+        const rot = transformRotation(p.rotation || 0);
+        const pad = { type: 'pad', x: roundTo(pos.x, 4), y: roundTo(pos.y, 4), w: p.w, h: p.h };
+        if (rot) pad.rotation = rot;
+        copperBack.push(pad);
+      });
+      bottomTraces.forEach(t => { t.segments.forEach(s => {
+        const p1 = transformTracePoint(t, s.x1, s.y1);
+        const p2 = transformTracePoint(t, s.x2, s.y2);
+        copperBack.push({ type: 'trace', x1: roundTo(p1.x, 4), y1: roundTo(p1.y, 4), x2: roundTo(p2.x, 4), y2: roundTo(p2.y, 4), w: s.w });
+      }); });
+      features.copperBack = copperBack;
+    }
+
+    if (vias.length > 0) {
+      features.drills = vias.map(v => {
+        const p = transformPoint(v.x, v.y);
+        return { x: roundTo(p.x, 4), y: roundTo(p.y, 4), drill: v.drill, size: v.size };
+      });
+    }
+
+    const silkTextEntries = silkText.map(t => {
+      const p = transformPoint(t.x, t.y);
+      return { type: 'text', text: t.text, x: roundTo(p.x, 4), y: roundTo(p.y, 4), height: t.height || 1, rotation: transformRotation(t.rotation || 0) };
+    });
+    if (silkTextEntries.length > 0) features.silkText = silkTextEntries;
+
+    const overlay = false;
+
+    const metaEntries = Object.entries({ author: adapter.meta?.author, license: adapter.meta?.license, source: adapter.meta?.source }).filter(([, v]) => v);
+    const obj = {
+      id,
+      name,
+      ...(metaEntries.length ? { meta: Object.fromEntries(metaEntries) } : {}),
+      category,
+      pitch: baseGrid,
+      color: '#a060c0',
+      throughPins: throughPins.map(tp => ({ col: tp.col, row: tp.row, label: tp.label })),
+      features,
+      outline: { width: roundTo((widthPins - 1) * baseGrid + 2, 1), height: roundTo((heightPins - 1) * baseGrid + 2, 1) },
+      outlineOffset: { x: 0, y: 0 },
+      widthPins,
+      heightPins,      
+      ...(adapter.silkLabel?.show ? { silkLabel: { text: adapter.name, rotation: 0, x: adapter.silkLabel.x, y: adapter.silkLabel.y, height: adapter.silkLabel.height || 1 } } : {}),
+      overlay,
+    };
+
+    // Custom formatter: keep leaf objects (all-primitive values) on one line
+    const formatJson = (val, indent) => {
+      if (val === null || typeof val !== 'object') return JSON.stringify(val);
+      if (Array.isArray(val)) {
+        if (val.length === 0) return '[]';
+        const items = val.map(v => formatJson(v, indent + '  '));
+        // If every item is a leaf object or primitive, put each on its own line but compact
+        const isLeafArray = val.every(v => v !== null && typeof v === 'object' && !Array.isArray(v) &&
+          Object.values(v).every(x => x === null || typeof x !== 'object'));
+        if (isLeafArray) {
+          return '[\n' + items.map(s => indent + '  ' + s).join(',\n') + '\n' + indent + ']';
+        }
+        return '[\n' + items.map(s => indent + '  ' + s).join(',\n') + '\n' + indent + ']';
+      }
+      const isLeaf = Object.values(val).every(v => v === null || typeof v !== 'object');
+      if (isLeaf) {
+        return '{ ' + Object.entries(val).map(([k, v]) => JSON.stringify(k) + ': ' + JSON.stringify(v)).join(', ') + ' }';
+      }
+      const lines = Object.entries(val).map(([k, v]) => indent + '  ' + JSON.stringify(k) + ': ' + formatJson(v, indent + '  '));
+      return '{\n' + lines.join(',\n') + '\n' + indent + '}';
+    };
+    return formatJson(obj, '');
+  }, [adapter, maskExpansion, bottomPads, bottomTraces, vias, transformPoint, transformRotation, transformTracePoint, baseGrid, basePitchKey, interfacePinPad, interfacePinDrill]);
+
+  const downloadJson = () => {
+    const blob = new Blob([generateJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${adapter.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const gridDots = [];
   for (let c = 0; c < adapter.widthPins; c++)
     for (let r = 0; r < adapter.heightPins; r++)
-      gridDots.push({ x: c * GRID, y: r * GRID, col: c, row: r });
+      gridDots.push({ x: c * baseGrid, y: r * baseGrid, col: c, row: r });
 
   const inputStyle = { background: COLORS.inputBg, border: `1px solid ${COLORS.panelBorder}`, color: COLORS.text, padding: "2px 4px", borderRadius: 2, fontSize: 11, fontFamily: "inherit" };
   const btnStyle = { background: COLORS.btnBg, color: COLORS.text, border: "none", padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontSize: 10, fontFamily: "inherit" };
@@ -217,7 +977,7 @@ function AdapterEditor() {
     React.createElement("div", { style: { display: "flex", height: "100vh", background: COLORS.bg, color: COLORS.text, fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace", fontSize: 12 } },
 
       // Left Panel
-      React.createElement("div", { style: { width: 280, borderRight: `1px solid ${COLORS.panelBorder}`, background: COLORS.panelBg, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 } },
+      React.createElement("div", { style: { width: 290, borderRight: `1px solid ${COLORS.panelBorder}`, background: COLORS.panelBg, overflow: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 } },
         React.createElement("h2", { style: { margin: 0, fontSize: 14, color: COLORS.accent, letterSpacing: 1 } }, "⚡ ADAPTER EDITOR"),
 
         // Adapter config
@@ -230,30 +990,87 @@ function AdapterEditor() {
             React.createElement("input", { value: adapter.name, onChange: e => setAdapter(a => ({ ...a, name: e.target.value })), style: inputStyle }),
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Cat."),
             React.createElement("input", { value: adapter.category, onChange: e => setAdapter(a => ({ ...a, category: e.target.value })), style: inputStyle }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Author"),
+            React.createElement("input", { value: adapter.meta?.author || "", onChange: e => setAdapter(a => ({ ...a, meta: { ...a.meta, author: e.target.value } })), style: inputStyle, placeholder: "optional" }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "License"),
+            React.createElement("input", { value: adapter.meta?.license || "", onChange: e => setAdapter(a => ({ ...a, meta: { ...a.meta, license: e.target.value } })), style: inputStyle, placeholder: "optional" }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Source"),
+            React.createElement("input", { value: adapter.meta?.source || "", onChange: e => setAdapter(a => ({ ...a, meta: { ...a.meta, source: e.target.value } })), style: inputStyle, placeholder: "optional" }),
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Grid"),
             React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
               React.createElement("input", { type: "number", min: 1, max: 20, value: adapter.widthPins, onChange: e => setAdapter(a => ({ ...a, widthPins: parseInt(e.target.value) || 1 })), style: { ...inputStyle, width: 40 } }),
               React.createElement("span", { style: { color: COLORS.textDim } }, "×"),
               React.createElement("input", { type: "number", min: 1, max: 20, value: adapter.heightPins, onChange: e => setAdapter(a => ({ ...a, heightPins: parseInt(e.target.value) || 1 })), style: { ...inputStyle, width: 40 } }),
             ),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Base grid (mm)"),
+              React.createElement("select", {
+              value: baseGrid,
+              onChange: e => {
+                              const nextGrid = parseFloat(e.target.value) || DEFAULT_BASE_GRID;
+                              const nextPitchKey = e.target.value;
+                              const nextProfile = BASE_PITCH_PROFILES[nextPitchKey] || BASE_PITCH_PROFILES['2.54'];
+                              setBaseGrid(nextGrid);
+                              setBasePitchKey(nextPitchKey);
+                              setInterfacePinPad(nextProfile.padSize);
+                              setInterfacePinDrill(nextProfile.drillSize);
+              },
+              style: inputStyle,
+            },
+              BASE_GRID_OPTIONS.map(v => React.createElement("option", { key: v, value: v }, `${v} mm`))
+            ),
           ),
         ),
 
         // Origin offset
-        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
-          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "ORIGIN OFFSET (mm)"),
-          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+        React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4} },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "ORIGIN OFFSET (mm) / ROTATION (°)"),
+          React.createElement("div", { style: { marginTop: 4,  fontSize: 10, color: COLORS.textDim } }, "Shifts KiCad center → adapter origin"),
+          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", marginTop: 4 } },
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "X"),
             React.createElement("input", { type: "number", step: 0.01, value: adapter.originOffset.x, onChange: e => setAdapter(a => ({ ...a, originOffset: { ...a.originOffset, x: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: 64 } }),
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Y"),
             React.createElement("input", { type: "number", step: 0.01, value: adapter.originOffset.y, onChange: e => setAdapter(a => ({ ...a, originOffset: { ...a.originOffset, y: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: 64 } }),
           ),
-          React.createElement("div", { style: { marginTop: 4, fontSize: 10, color: COLORS.textDim } }, "Shifts KiCad center → adapter origin"),
+          React.createElement("div", { style: { marginTop: 4,  fontSize: 10, color: COLORS.textDim } }, "Set rotation before import or import again, to recalculate positions"),
+          React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", marginTop: 8 } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "R"),
+            React.createElement("input", {
+              type: "number",
+              step: 1,
+              value: adapter.originOffset.rot ?? 0,
+              onChange: e => setAdapter(a => {
+                const rot = parseFloat(e.target.value);
+                return { ...a, originOffset: { ...a.originOffset, rot: Number.isFinite(rot) ? rot : 0 } };
+              }),
+              style: { ...inputStyle, width: 64 }
+            }),
+          ),
         ),
 
         // TH Pins
         React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
           React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "TH PINS (click grid dots)"),
+
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "70px 1fr", gap: 4, alignItems: "center", marginBottom: 8 } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Pad (mm)"),
+            React.createElement("input", {
+              type: "number",
+              step: 0.05,
+              min: 0.1,
+              value: interfacePinPad,
+              onChange: e => setInterfacePinPad(Math.max(parseFloat(e.target.value) || 0.1, 0.1)),
+              style: { ...inputStyle, width: "100%" }
+            }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Drill (mm)"),
+            React.createElement("input", {
+              type: "number",
+              step: 0.05,
+              min: 0.05,
+              value: interfacePinDrill,
+              onChange: e => setInterfacePinDrill(Math.max(parseFloat(e.target.value) || 0.05, 0.05)),
+              style: { ...inputStyle, width: "100%" }
+            }),
+          ),
           React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 2 } },
             adapter.throughPins.map((tp, i) =>
               React.createElement("span", { key: i, style: { background: COLORS.btnBg, padding: "1px 4px", borderRadius: 2, fontSize: 10, cursor: "pointer" }, onClick: () => setAdapter(a => ({ ...a, throughPins: a.throughPins.filter((_, j) => j !== i) })) },
@@ -266,9 +1083,10 @@ function AdapterEditor() {
         // Tools
         React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
           React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "TOOLS"),
-          React.createElement("div", { style: { display: "flex", gap: 4 } },
-            React.createElement("button", { onClick: () => { setTool("select"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "select" ? COLORS.accent : COLORS.btnBg } }, "Select"),
+          React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
+            React.createElement("button", { onClick: () => { setTool("select"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "select" ? COLORS.accent : COLORS.btnBg } }, "Select (V)"),
             React.createElement("button", { onClick: () => { setTool("trace"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "trace" ? COLORS.accent : COLORS.btnBg } }, "Trace (T)"),
+            React.createElement("button", { onClick: () => { setTool("edit-pins"); setTracePoints([]); }, style: { ...btnStyle, background: tool === "edit-pins" ? "#e09020" : COLORS.btnBg } }, "Edit Pins (P)"),
           ),
           tool === "trace" && React.createElement("div", { style: { marginTop: 6 } },
             React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Width: "),
@@ -276,26 +1094,99 @@ function AdapterEditor() {
             React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim } }, " mm"),
             React.createElement("div", { style: { fontSize: 9, color: COLORS.textDim, marginTop: 4 } }, "Click → Enter to finish, Esc to cancel"),
           ),
-          React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } },
+          React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" } },
             React.createElement("label", { style: { fontSize: 10, display: "flex", gap: 3, alignItems: "center", cursor: "pointer" } },
-              React.createElement("input", { type: "checkbox", checked: snapToGrid, onChange: () => { setSnapToGrid(!snapToGrid); setSnapSmall(false); } }), "2.54mm (G)"
+                            React.createElement("input", { type: "checkbox", checked: snapToGrid, onChange: () => { setSnapToGrid(!snapToGrid); setSnapSmall(false); } }), `${baseGrid}mm (G)`
             ),
             React.createElement("label", { style: { fontSize: 10, display: "flex", gap: 3, alignItems: "center", cursor: "pointer" } },
               React.createElement("input", { type: "checkbox", checked: snapSmall, onChange: () => { setSnapSmall(!snapSmall); setSnapToGrid(false); } }), "0.127mm (S)"
+            ),
+            React.createElement("label", { style: { fontSize: 10, display: "flex", gap: 3, alignItems: "center", cursor: "pointer" } },
+              React.createElement("input", { type: "checkbox", checked: snap45, onChange: () => setSnap45(s => !s) }), "45° (A)"
             ),
           ),
         ),
 
         // Import
-        React.createElement("button", { onClick: () => setShowImport(!showImport), style: { ...btnStyle, padding: "6px 8px", fontSize: 11, border: `1px solid ${COLORS.panelBorder}` } }, "📁 Import .kicad_mod"),
+        React.createElement("button", { onClick: () => setShowImport(!showImport), style: { ...btnStyle, padding: "6px 8px", fontSize: 11, border: `1px solid ${COLORS.panelBorder}` } }, "📁 Import KiCad Footprint / PCB"),
         showImport && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4 } },
-          React.createElement("input", { type: "file", accept: ".kicad_mod", onChange: handleFileImport, style: { fontSize: 10, color: COLORS.textDim } }),
-          React.createElement("textarea", { value: importText, onChange: e => setImportText(e.target.value), placeholder: "...or paste content", rows: 4, style: { ...inputStyle, fontSize: 10, resize: "vertical" } }),
-          React.createElement("button", { onClick: doImport, style: { ...btnStyle, background: COLORS.accent, color: "#fff" } }, "Import Pads"),
+          React.createElement("input", { type: "file", accept: ".kicad_mod,.kicad_pcb,.gbr,.gtl,.gbl", onChange: handleFileImport, style: { fontSize: 10, color: COLORS.textDim } }),
+          React.createElement("textarea", { value: importText, onChange: e => setImportText(e.target.value), placeholder: "...or paste file content", rows: 4, style: { ...inputStyle, fontSize: 10, resize: "vertical" } }),
+          React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
+            React.createElement("button", { onClick: doImport, style: { ...btnStyle, background: COLORS.accent, color: "#fff" } }, "KiCad Mod"),
+            React.createElement("button", { onClick: () => {
+              const parsed = parseKicadPcb(importText);
+              if (parsed.error) { alert(parsed.error); return; }
+              const result = kicadPcbToAdapter(parsed);
+              if (!result) { alert("Parse failed"); return; }
+              const rotated = applyFootprintRotationToImport(result, adapter.originOffset.rot || 0);
+
+              // Auto-set grid size from board dimensions
+              const gridW = Math.round(result.boardW / baseGrid) + 1;
+              const gridH = Math.round(result.boardH / baseGrid) + 1;
+              setAdapter(a => ({
+                ...a,
+                meta: { ...(a.meta || {}), source: "Imported from KiCad" },
+                widthPins: gridW, heightPins: gridH,
+                smdPads: rotated.smdPads,
+                traces: rotated.topTraces.map(t => ({ ...t, applyOriginOffset: true })),
+                silkLines: rotated.silkLines,
+                silkText: rotated.silkText,
+              }));
+              setBottomPads(rotated.bottomPads || []);
+              setBottomTraces(rotated.bottomTraces);
+              setVias(rotated.vias);
+              setShowImport(false);
+            }, style: { ...btnStyle, background: "#4080d0", color: "#fff" } }, "KiCad PCB"),
+          ),
+          React.createElement("div", { style: { fontSize: 9, color: COLORS.textDim } },
+            "KiCad PCB: imports F.Cu + B.Cu traces, pads, vias + F.SilkS from .kicad_pcb"
+          ),
         ),
 
+        // Open JSON
+        React.createElement("input", { ref: jsonFileInputRef, type: "file", accept: ".json", style: { display: "none" }, onChange: handleOpenJson }),
+        React.createElement("button", {
+          onClick: () => jsonFileInputRef.current?.click(),
+          style: { ...btnStyle, padding: "6px 8px", fontSize: 11, border: `1px solid ${COLORS.panelBorder}`, width: "100%" },
+        }, "📂 Open/Edit JSON file"),
+
         // Export
-        React.createElement("button", { onClick: () => setShowCode(!showCode), style: { ...btnStyle, background: COLORS.accent, color: "#fff", padding: "6px 8px", fontSize: 11 } }, showCode ? "Hide Code" : "📋 Export JS Code"),
+        React.createElement("div", { style: { display: "flex", gap: 4 } },
+          React.createElement("button", { onClick: downloadJson, style: { ...btnStyle, background: COLORS.accent, color: "#fff", padding: "6px 8px", fontSize: 11, flex: 1 } }, "💾 Download JSON"),
+          React.createElement("button", { onClick: () => setShowCode(!showCode), style: { ...btnStyle, padding: "6px 8px", fontSize: 11 } }, showCode ? "▶" : "{ }"),
+        ),
+
+        // Layer toggle        
+        (bottomPads.length > 0 || bottomTraces.length > 0 || vias.length > 0) && React.createElement("fieldset", { style: { border: `1px solid ${COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, `LAYERS (B.Cu: ${bottomPads.length} pads, ${bottomTraces.length} traces, ${vias.length} vias)`),
+          React.createElement("div", { style: { display: "flex", gap: 4 } },
+            ["both", "F.Cu", "B.Cu"].map(l =>
+              React.createElement("button", { key: l, onClick: () => setShowLayer(l), style: { ...btnStyle, background: showLayer === l ? (l === "B.Cu" ? "#2060c0" : l === "F.Cu" ? COLORS.accent : "#606") : COLORS.btnBg, fontSize: 10 } }, l)
+            ),
+          ),
+        ),
+
+        // Silk Label
+        React.createElement("fieldset", { style: { border: `1px solid ${selectedSilkLabel ? COLORS.accent : COLORS.panelBorder}`, padding: 8, borderRadius: 4 } },
+          React.createElement("legend", { style: { color: COLORS.textDim, fontSize: 10 } }, "SILK LABEL"),
+          React.createElement("label", { style: { fontSize: 10, display: "flex", gap: 4, alignItems: "center", cursor: "pointer", marginBottom: 6 } },
+            React.createElement("input", { type: "checkbox", checked: adapter.silkLabel?.show || false, onChange: e => setAdapter(a => ({ ...a, silkLabel: { ...(a.silkLabel || DEFAULT_ADAPTER.silkLabel), show: e.target.checked } })) }),
+            "Show (Name as text)"
+          ),
+          adapter.silkLabel?.show && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "32px 1fr", gap: 4, alignItems: "center" } },
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "X"),
+            React.createElement("input", { type: "number", step: 0.1, value: adapter.silkLabel.x, onChange: e => setAdapter(a => ({ ...a, silkLabel: { ...a.silkLabel, x: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: "100%" } }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "Y"),
+            React.createElement("input", { type: "number", step: 0.1, value: adapter.silkLabel.y, onChange: e => setAdapter(a => ({ ...a, silkLabel: { ...a.silkLabel, y: parseFloat(e.target.value) || 0 } })), style: { ...inputStyle, width: "100%" } }),
+            React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, "H"),
+            React.createElement("input", { type: "number", step: 0.1, min: 0.3, max: 5, value: adapter.silkLabel.height || 1, onChange: e => setAdapter(a => ({ ...a, silkLabel: { ...a.silkLabel, height: parseFloat(e.target.value) || 1 } })), style: { ...inputStyle, width: "100%" } }),
+            selectedSilkLabel && React.createElement(React.Fragment, null,
+              React.createElement("span", null),
+              React.createElement("div", { style: { fontSize: 9, color: COLORS.textDim, marginTop: 2 } }, "← → ↑ ↓ bewegen | Shift = 0.127mm"),
+            ),
+          ),
+        ),
 
         // Mask expansion
         React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center" } },
@@ -304,17 +1195,67 @@ function AdapterEditor() {
           React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim } }, "mm"),
         ),
 
-        // Selected pad info
-        selectedPad !== null && adapter.smdPads[selectedPad] && React.createElement("fieldset", { style: { border: `1px solid ${COLORS.accent}`, padding: 8, borderRadius: 4 } },
-          React.createElement("legend", { style: { color: COLORS.accent, fontSize: 10 } }, `PAD ${adapter.smdPads[selectedPad].pin}`),
-          React.createElement("div", { style: { fontSize: 10, lineHeight: 1.6 } },
-            `Pos: (${adapter.smdPads[selectedPad].x}, ${adapter.smdPads[selectedPad].y})`,
-            React.createElement("br"),
-            `Size: ${adapter.smdPads[selectedPad].w} × ${adapter.smdPads[selectedPad].h} mm`,
-            React.createElement("br"),
-            `Export: (${roundTo(adapter.smdPads[selectedPad].x + adapter.originOffset.x, 4)}, ${roundTo(adapter.smdPads[selectedPad].y + adapter.originOffset.y, 4)})`,
-          ),
-        ),
+        // Properties panel
+        (() => {
+          const hasSel = selectedPad !== null || selectedTrace !== null || selectedSilkLabel ||
+            selectedBottomPad !== null || selectedBottomTrace !== null || selectedVia !== null ||
+            selectedSilkLine !== null || selectedSilkText !== null;
+          if (!hasSel) return null;
+          const g2 = (...ch) => React.createElement("div", { style: { display: "grid", gridTemplateColumns: "40px 1fr", gap: "3px 6px", alignItems: "center", marginTop: 4 } }, ...ch);
+          const lbl = (t) => React.createElement("label", { style: { fontSize: 10, color: COLORS.textDim } }, t);
+          const numIn = (val, onChange, step = 0.01) => React.createElement("input", { type: "number", step, value: val, onChange: e => { const v = parseFloat(e.target.value); onChange(isNaN(v) ? 0 : v); }, style: { ...inputStyle, width: "100%" } });
+          let title = '', content = null;
+          if (selectedPad !== null && adapter.smdPads[selectedPad]) {
+            const p = adapter.smdPads[selectedPad];
+            const upd = (f, v) => setAdapter(a => { const s = [...a.smdPads]; s[selectedPad] = { ...s[selectedPad], [f]: v }; return { ...a, smdPads: s }; });
+            title = `SMD PAD ${p.pin} (F.Cu)`;
+            content = g2(lbl("Pin"), React.createElement("input", { type: "number", value: p.pin, onChange: e => upd('pin', parseInt(e.target.value) || 1), style: { ...inputStyle, width: "100%" } }),
+              lbl("X"), numIn(p.x, v => upd('x', v)), lbl("Y"), numIn(p.y, v => upd('y', v)),
+              lbl("W"), numIn(p.w, v => upd('w', v)), lbl("H"), numIn(p.h, v => upd('h', v)),
+              lbl("Rot"), numIn(p.rotation || 0, v => upd('rotation', v), 1));
+          } else if (selectedTrace !== null && adapter.traces[selectedTrace]) {
+            const tr = adapter.traces[selectedTrace];
+            title = `TRACE F.Cu (${tr.segments.length} seg)`;
+            content = g2(lbl("W"), numIn(tr.segments[0]?.w || 0.3, v => setAdapter(a => { const t2 = [...a.traces]; t2[selectedTrace] = { ...t2[selectedTrace], segments: t2[selectedTrace].segments.map(s => ({ ...s, w: v })) }; return { ...a, traces: t2 }; }), 0.05));
+          } else if (selectedBottomPad !== null && bottomPads[selectedBottomPad]) {
+            const p = bottomPads[selectedBottomPad];
+            const upd = (f, v) => setBottomPads(ps => { const s = [...ps]; s[selectedBottomPad] = { ...s[selectedBottomPad], [f]: v }; return s; });
+            title = `SMD PAD ${p.pin} (B.Cu)`;
+            content = g2(lbl("Pin"), React.createElement("input", { type: "number", value: p.pin, onChange: e => upd('pin', parseInt(e.target.value) || 1), style: { ...inputStyle, width: "100%" } }),
+              lbl("X"), numIn(p.x, v => upd('x', v)), lbl("Y"), numIn(p.y, v => upd('y', v)),
+              lbl("W"), numIn(p.w, v => upd('w', v)), lbl("H"), numIn(p.h, v => upd('h', v)),
+              lbl("Rot"), numIn(p.rotation || 0, v => upd('rotation', v), 1));
+          } else if (selectedBottomTrace !== null && bottomTraces[selectedBottomTrace]) {
+            const tr = bottomTraces[selectedBottomTrace];
+            title = `TRACE B.Cu (${tr.segments.length} seg)`;
+            content = g2(lbl("W"), numIn(tr.segments[0]?.w || 0.3, v => setBottomTraces(ts => { const t2 = [...ts]; t2[selectedBottomTrace] = { ...t2[selectedBottomTrace], segments: t2[selectedBottomTrace].segments.map(s => ({ ...s, w: v })) }; return t2; }), 0.05));
+          } else if (selectedVia !== null && vias[selectedVia]) {
+            const v = vias[selectedVia];
+            const upd = (f, val) => setVias(vs => { const s = [...vs]; s[selectedVia] = { ...s[selectedVia], [f]: val }; return s; });
+            title = `VIA`;
+            content = g2(lbl("X"), numIn(v.x, val => upd('x', val)), lbl("Y"), numIn(v.y, val => upd('y', val)),
+              lbl("Size"), numIn(v.size, val => upd('size', val)), lbl("Drill"), numIn(v.drill, val => upd('drill', val)));
+          } else if (selectedSilkLine !== null && adapter.silkLines[selectedSilkLine]) {
+            const sl = adapter.silkLines[selectedSilkLine];
+            const upd = (f, v) => setAdapter(a => { const s = [...a.silkLines]; s[selectedSilkLine] = { ...s[selectedSilkLine], [f]: v }; return { ...a, silkLines: s }; });
+            title = `SILK LINE`;
+            content = g2(lbl("X1"), numIn(sl.x1, v => upd('x1', v)), lbl("Y1"), numIn(sl.y1, v => upd('y1', v)),
+              lbl("X2"), numIn(sl.x2, v => upd('x2', v)), lbl("Y2"), numIn(sl.y2, v => upd('y2', v)));
+          } else if (selectedSilkText !== null && adapter.silkText[selectedSilkText]) {
+            const t = adapter.silkText[selectedSilkText];
+            const upd = (f, v) => setAdapter(a => { const st = [...a.silkText]; st[selectedSilkText] = { ...st[selectedSilkText], [f]: v }; return { ...a, silkText: st }; });
+            title = `REF TEXT`;
+            content = React.createElement(React.Fragment, null,
+              React.createElement("input", { value: t.text, onChange: e => upd('text', e.target.value), style: { ...inputStyle, width: "100%", marginTop: 4 } }),
+              g2(lbl("X"), numIn(t.x, v => upd('x', v)), lbl("Y"), numIn(t.y, v => upd('y', v)),
+                lbl("H"), numIn(t.height || 1, v => upd('height', v), 0.1), lbl("Rot"), numIn(t.rotation || 0, v => upd('rotation', v), 1)),
+              React.createElement("div", { style: { fontSize: 9, color: COLORS.textDim, marginTop: 4 } }, "← → ↑ ↓ move | Shift = 0.127mm | drag"));
+          }
+          return React.createElement("fieldset", { style: { border: `1px solid ${COLORS.accent}`, padding: 8, borderRadius: 4 } },
+            React.createElement("legend", { style: { color: COLORS.accent, fontSize: 10 } }, title),
+            content,
+          );
+        })(),
 
         // Status bar
         React.createElement("div", { style: { fontSize: 10, color: COLORS.textDim, marginTop: "auto" } },
@@ -322,7 +1263,7 @@ function AdapterEditor() {
             `World: (${mousePos.world.x.toFixed(3)}, ${mousePos.world.y.toFixed(3)})`, React.createElement("br"),
             `Snap: (${mousePos.snapped.x.toFixed(3)}, ${mousePos.snapped.y.toFixed(3)})`, React.createElement("br"),
           ),
-          `Pads: ${adapter.smdPads.length} | Traces: ${adapter.traces.length} | TH: ${adapter.throughPins.length}`,
+          `Pads: ${adapter.smdPads.length} | F.Cu: ${adapter.traces.length} | B.Cu pads: ${bottomPads.length} | B.Cu traces: ${bottomTraces.length} | Vias: ${vias.length} | TH: ${adapter.throughPins.length}`,
         ),
       ),
 
@@ -334,14 +1275,18 @@ function AdapterEditor() {
           onMouseDown: handleMouseDown, onMouseMove: handleMouseMove, onMouseUp: handleMouseUp, onMouseLeave: handleMouseUp,
           onClick: (e) => {
             if (isPanning.current) return;
+            if (didDragSilkLabel.current) { didDragSilkLabel.current = false; return; }
             const rect = svgRef.current.getBoundingClientRect();
             const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-            const w = toWorld(sx, sy), snapped = snapWorld(w.x, w.y);
+            const w = toWorld(sx, sy);
+            const _snapped = snapWorld(w.x, w.y);
+            const _lastTp = tracePoints.length > 0 ? tracePoints[tracePoints.length - 1] : null;
+            const snapped = (snap45 && _lastTp) ? constrainTo45(_snapped.x, _snapped.y, _lastTp.x, _lastTp.y) : _snapped;
 
-            if (tool === "select" && !e.altKey) {
-              const col = Math.round(w.x / GRID), row = Math.round(w.y / GRID);
+            if (tool === "edit-pins" && !e.altKey) {
+              const col = Math.round(w.x / baseGrid), row = Math.round(w.y / baseGrid);
               if (col >= 0 && col < adapter.widthPins && row >= 0 && row < adapter.heightPins) {
-                const dist = Math.sqrt((w.x - col * GRID) ** 2 + (w.y - row * GRID) ** 2);
+                const dist = Math.sqrt((w.x - col * baseGrid) ** 2 + (w.y - row * baseGrid) ** 2);
                 if (dist < 0.8) {
                   const idx = adapter.throughPins.findIndex(tp => tp.col === col && tp.row === row);
                   if (idx >= 0) setAdapter(a => ({ ...a, throughPins: a.throughPins.filter((_, i) => i !== idx) }));
@@ -349,17 +1294,82 @@ function AdapterEditor() {
                   return;
                 }
               }
-              setSelectedTrace(null); setSelectedPad(null);
+            } else if (tool === "select" && !e.altKey) {
+              const candidates = [];
               for (let i = 0; i < adapter.smdPads.length; i++) {
                 const p = adapter.smdPads[i];
-                if (Math.abs(w.x - p.x) < p.w / 2 + 0.3 && Math.abs(w.y - p.y) < p.h / 2 + 0.3) { setSelectedPad(i); return; }
+                const tp = transformPoint(p.x, p.y);
+                if (Math.abs(w.x - tp.x) < p.w / 2 + 0.3 && Math.abs(w.y - tp.y) < p.h / 2 + 0.3)
+                  candidates.push({ type: 'pad', index: i });
               }
               for (let i = 0; i < adapter.traces.length; i++) {
-                for (const s of adapter.traces[i].segments) {
-                  const mx = (s.x1 + s.x2) / 2, my = (s.y1 + s.y2) / 2;
-                  if (Math.abs(w.x - mx) < 0.8 && Math.abs(w.y - my) < 0.8) { setSelectedTrace(i); return; }
+                const tr = adapter.traces[i];
+                for (const s of tr.segments) {
+                  const tm = transformTracePoint(tr, (s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2);
+                  if (Math.abs(w.x - tm.x) < 0.8 && Math.abs(w.y - tm.y) < 0.8) { candidates.push({ type: 'trace', index: i }); break; }
                 }
               }
+              for (let i = 0; i < bottomPads.length; i++) {
+                const p = bottomPads[i];
+                const tp = transformPoint(p.x, p.y);
+                if (Math.abs(w.x - tp.x) < p.w / 2 + 0.3 && Math.abs(w.y - tp.y) < p.h / 2 + 0.3)
+                  candidates.push({ type: 'bottomPad', index: i });
+              }
+              for (let i = 0; i < bottomTraces.length; i++) {
+                const tr = bottomTraces[i];
+                for (const s of tr.segments) {
+                  const tm = transformPoint((s.x1 + s.x2) / 2, (s.y1 + s.y2) / 2);
+                  if (Math.abs(w.x - tm.x) < 0.8 && Math.abs(w.y - tm.y) < 0.8) { candidates.push({ type: 'bottomTrace', index: i }); break; }
+                }
+              }
+              for (let i = 0; i < vias.length; i++) {
+                const tv = transformPoint(vias[i].x, vias[i].y);
+                if (Math.sqrt((w.x - tv.x) ** 2 + (w.y - tv.y) ** 2) < vias[i].size / 2 + 0.3)
+                  candidates.push({ type: 'via', index: i });
+              }
+              for (let i = 0; i < adapter.silkLines.length; i++) {
+                const sl = adapter.silkLines[i];
+                const t1 = transformPoint(sl.x1, sl.y1), t2 = transformPoint(sl.x2, sl.y2);
+                const mx = (t1.x + t2.x) / 2, my = (t1.y + t2.y) / 2;
+                if (Math.abs(w.x - mx) < Math.abs(t2.x - t1.x) / 2 + 0.8 && Math.abs(w.y - my) < Math.abs(t2.y - t1.y) / 2 + 0.8)
+                  candidates.push({ type: 'silkLine', index: i });
+              }
+              for (let i = 0; i < adapter.silkText.length; i++) {
+                const t = adapter.silkText[i];
+                const tt = transformPoint(t.x, t.y);
+                const fh = t.height || 1;
+                if (Math.abs(w.x - tt.x) < t.text.length * fh * 0.3 + 0.5 && Math.abs(w.y - tt.y) < fh * 0.6 + 0.3)
+                  candidates.push({ type: 'silkText', index: i });
+              }
+              if (adapter.silkLabel?.show) {
+                const lp = transformPoint(adapter.silkLabel.x, adapter.silkLabel.y);
+                const fontH = adapter.silkLabel.height || 1;
+                const approxHalfW = adapter.name.length * fontH * 0.3 + 0.5;
+                if (Math.abs(w.x - lp.x) < approxHalfW && Math.abs(w.y - lp.y) < fontH * 0.6 + 0.3)
+                  candidates.push({ type: 'silkLabel' });
+              }
+              const clearAll = () => { setSelectedPad(null); setSelectedTrace(null); setSelectedSilkLabel(false); setSelectedBottomPad(null); setSelectedBottomTrace(null); setSelectedVia(null); setSelectedSilkLine(null); setSelectedSilkText(null); };
+              if (candidates.length === 0) { clearAll(); return; }
+              const curIdx = candidates.findIndex(c =>
+                (c.type === 'pad' && c.index === selectedPad) ||
+                (c.type === 'trace' && c.index === selectedTrace) ||
+                (c.type === 'silkLabel' && selectedSilkLabel) ||
+                (c.type === 'bottomPad' && c.index === selectedBottomPad) ||
+                (c.type === 'bottomTrace' && c.index === selectedBottomTrace) ||
+                (c.type === 'via' && c.index === selectedVia) ||
+                (c.type === 'silkLine' && c.index === selectedSilkLine) ||
+                (c.type === 'silkText' && c.index === selectedSilkText)
+              );
+              const next = candidates[(curIdx + 1) % candidates.length];
+              clearAll();
+              if (next.type === 'pad') setSelectedPad(next.index);
+              else if (next.type === 'trace') setSelectedTrace(next.index);
+              else if (next.type === 'silkLabel') setSelectedSilkLabel(true);
+              else if (next.type === 'bottomPad') setSelectedBottomPad(next.index);
+              else if (next.type === 'bottomTrace') setSelectedBottomTrace(next.index);
+              else if (next.type === 'via') setSelectedVia(next.index);
+              else if (next.type === 'silkLine') setSelectedSilkLine(next.index);
+              else if (next.type === 'silkText') setSelectedSilkText(next.index);
             } else if (tool === "trace") {
               setTracePoints(pts => [...pts, snapped]);
             }
@@ -369,8 +1379,8 @@ function AdapterEditor() {
 
           // Grid boundary
           (() => {
-            const tl = toScreen(0, (adapter.heightPins - 1) * GRID);
-            const br = toScreen((adapter.widthPins - 1) * GRID, 0);
+            const tl = toScreen(0, (adapter.heightPins - 1) * baseGrid);
+            const br = toScreen((adapter.widthPins - 1) * baseGrid, 0);
             return React.createElement("rect", { x: tl.sx - 6, y: tl.sy - 6, width: br.sx - tl.sx + 12, height: br.sy - tl.sy + 12, fill: "none", stroke: COLORS.panelBorder, strokeWidth: 1, strokeDasharray: "4 4", rx: 4 });
           })(),
 
@@ -379,38 +1389,177 @@ function AdapterEditor() {
             const { sx, sy } = toScreen(d.x, d.y);
             const isTH = adapter.throughPins.some(tp => tp.col === d.col && tp.row === d.row);
             const label = adapter.throughPins.find(tp => tp.col === d.col && tp.row === d.row)?.label;
+            const thPadR = (interfacePinPad / 2) * pxPerMm;
+            const thDrillR = (Math.min(interfacePinDrill, interfacePinPad) / 2) * pxPerMm;
             return React.createElement("g", { key: i },
               isTH ? React.createElement(React.Fragment, null,
-                React.createElement("circle", { cx: sx, cy: sy, r: 0.8 * pxPerMm, fill: COLORS.gridDotTH }),
-                React.createElement("circle", { cx: sx, cy: sy, r: 0.5 * pxPerMm, fill: COLORS.gridDotTHInner }),
-                React.createElement("text", { x: sx, y: sy + 0.25 * pxPerMm, textAnchor: "middle", fill: "#fff", fontSize: Math.max(0.45 * pxPerMm, 8), fontFamily: "monospace", style: { pointerEvents: "none" } }, label),
+                React.createElement("circle", { cx: sx, cy: sy, r: thPadR, fill: COLORS.gridDotTH }),
+                React.createElement("circle", { cx: sx, cy: sy, r: thDrillR, fill: COLORS.gridDotTHInner }),                
+                React.createElement("text", { x: sx, y: sy + 0.25 * pxPerMm, textAnchor: "middle", fill: "#fff", fontSize: Math.max(thPadR * 0.55, 8), fontFamily: "monospace", style: { pointerEvents: "none" } }, label),
               ) : React.createElement("circle", { cx: sx, cy: sy, r: 3, fill: COLORS.gridDot }),
             );
           }),
 
           // SMD Pads
           adapter.smdPads.map((p, i) => {
-            const { sx, sy } = toScreen(p.x + adapter.originOffset.x, p.y + adapter.originOffset.y);
+            const tp = transformPoint(p.x, p.y);
+            const {sx, sy} = toScreen(tp.x, tp.y);
+
+            //const { sx, sy } = toScreen(p.x + adapter.originOffset.x, p.y + adapter.originOffset.y);
             const w = p.w * pxPerMm, h = p.h * pxPerMm;
-            return React.createElement("g", { key: `p${i}` },
+            const rot = transformRotation(p.rotation || 0);
+            return React.createElement("g", { key: `p${i}`, transform: rot ? `rotate(${-rot}, ${sx}, ${sy})` : undefined },
               React.createElement("rect", { x: sx - w / 2, y: sy - h / 2, width: w, height: h, fill: COLORS.smdPad, stroke: selectedPad === i ? COLORS.highlight : COLORS.smdPadStroke, strokeWidth: selectedPad === i ? 2 : 0.5, rx: 1 }),
-              React.createElement("text", { x: sx, y: sy + 0.15 * pxPerMm, textAnchor: "middle", fill: "#000", fontSize: Math.min(0.35 * pxPerMm, 11), fontFamily: "monospace", fontWeight: "bold", style: { pointerEvents: "none" } }, p.pin),
+              React.createElement("text", { x: sx, y: sy + 0.15 * pxPerMm, textAnchor: "middle", fill: "#000", fontSize: Math.min(0.35 * pxPerMm, 11), fontFamily: "monospace", fontWeight: "bold", style: { pointerEvents: "none" }, transform: rot ? `rotate(${rot}, ${sx}, ${sy})` : undefined }, p.pin),
             );
           }),
 
-          // Silk body
-          adapter.silkBody && adapter.silkBody.length > 2 && React.createElement("polygon", {
-            points: adapter.silkBody.map(p => { const s = toScreen(p.x + adapter.originOffset.x, p.y + adapter.originOffset.y); return `${s.sx},${s.sy}`; }).join(" "),
-            fill: "none", stroke: COLORS.silk, strokeWidth: 1, strokeDasharray: "3 2", opacity: 0.5,
+          //-----------------
+
+          // Traces (F.Cu - top)
+          (showLayer === "F.Cu" || showLayer === "both") && adapter.traces.map((t, ti) =>
+            React.createElement("g", { key: `t${ti}` },
+              t.segments.map((s, si) => {
+                const t1 = transformTracePoint(t, s.x1, s.y1);
+                const t2 = transformTracePoint(t, s.x2, s.y2);
+                const p1 = toScreen(t1.x, t1.y);
+                const p2 = toScreen(t2.x, t2.y);
+                return React.createElement("line", {
+                  key: si,
+                  x1: p1.sx, y1: p1.sy,
+                  x2: p2.sx, y2: p2.sy,
+                  stroke: selectedTrace === ti ? COLORS.highlight : COLORS.trace,
+                  strokeWidth: Math.max(s.w * pxPerMm, 1.5),
+                  strokeLinecap: "round",
+                });
+              })
+            )
+          ),
+
+          // Pads (B.Cu - bottom)
+          (showLayer === "B.Cu" || showLayer === "both") && bottomPads.map((p, i) => {
+            const tp = transformPoint(p.x, p.y);
+            const { sx, sy } = toScreen(tp.x, tp.y);
+            const w = p.w * pxPerMm, h = p.h * pxPerMm;
+            const rot = transformRotation(p.rotation || 0);
+            return React.createElement("g", { key: `bp${i}`, transform: rot ? `rotate(${-rot}, ${sx}, ${sy})` : undefined },
+              React.createElement("rect", { x: sx - w / 2, y: sy - h / 2, width: w, height: h, fill: "#4060d8", stroke: selectedBottomPad === i ? COLORS.highlight : "#80a0ff", strokeWidth: selectedBottomPad === i ? 2 : 0.8, opacity: showLayer === "both" ? 0.55 : 0.9, rx: 1 }),
+            );
           }),
 
-          // Traces
-          adapter.traces.map((t, ti) => React.createElement("g", { key: `t${ti}` },
-            t.segments.map((s, si) => {
-              const p1 = toScreen(s.x1, s.y1), p2 = toScreen(s.x2, s.y2);
-              return React.createElement("line", { key: si, x1: p1.sx, y1: p1.sy, x2: p2.sx, y2: p2.sy, stroke: selectedTrace === ti ? COLORS.highlight : COLORS.trace, strokeWidth: Math.max(s.w * pxPerMm, 1.5), strokeLinecap: "round" });
-            })
-          )),
+          // Traces (B.Cu - bottom)
+          (showLayer === "B.Cu" || showLayer === "both") && bottomTraces.map((t, ti) =>
+            React.createElement("g", { key: `bt${ti}` },
+              t.segments.map((s, si) => {
+                const t1 = transformPoint(s.x1, s.y1);
+                const t2 = transformPoint(s.x2, s.y2);
+                const p1 = toScreen(t1.x, t1.y);
+                const p2 = toScreen(t2.x, t2.y);
+                return React.createElement("line", {
+                  key: si,
+                  x1: p1.sx, y1: p1.sy,
+                  x2: p2.sx, y2: p2.sy,
+                  stroke: selectedBottomTrace === ti ? COLORS.highlight : "#4488ff",
+                  strokeWidth: Math.max(s.w * pxPerMm, 1.5),
+                  strokeLinecap: "round",
+                  opacity: showLayer === "both" ? 0.6 : 1,
+                });
+              })
+            )
+          ),
+
+          // Vias
+          vias.map((v, vi) => {
+            const tv = transformPoint(v.x, v.y);
+            const s = toScreen(tv.x, tv.y);
+            const outerR = (v.size / 2) * pxPerMm;
+            const innerR = (v.drill / 2) * pxPerMm;
+
+            return React.createElement("g", { key: `v${vi}` },
+              React.createElement("circle", {
+                cx: s.sx, cy: s.sy,
+                r: outerR,
+                fill: "#c8a020",
+                stroke: selectedVia === vi ? COLORS.highlight : "#e8c040",
+                strokeWidth: selectedVia === vi ? 2 : 1,
+              }),
+              React.createElement("circle", {
+                cx: s.sx, cy: s.sy,
+                r: innerR,
+                fill: COLORS.bg,
+                stroke: "#888",
+                strokeWidth: 0.5,
+              }),
+            );
+          }),
+
+          // Silkscreen lines
+          adapter.silkLines.map((s, si) => {
+            const t1 = transformPoint(s.x1, s.y1);
+            const t2 = transformPoint(s.x2, s.y2);
+            const p1 = toScreen(t1.x, t1.y);
+            const p2 = toScreen(t2.x, t2.y);
+            return React.createElement("line", {
+              key: `sl${si}`,
+              x1: p1.sx,
+              y1: p1.sy,
+              x2: p2.sx,
+              y2: p2.sy,
+              stroke: selectedSilkLine === si ? COLORS.highlight : COLORS.silk,
+              strokeWidth: selectedSilkLine === si ? 2 : 1.2,
+              opacity: 0.8,
+            });
+          }),
+
+          // Silkscreen reference text preview
+          adapter.silkText.map((t, ti) => {
+            const tt = transformPoint(t.x, t.y);
+            const s = toScreen(tt.x, tt.y);
+            const fontPx = Math.max((t.height || 1) * pxPerMm, 9);
+            const rotation = transformRotation(t.rotation || 0);
+            return React.createElement("text", {
+              key: `st${ti}`,
+              x: s.sx,
+              y: s.sy,
+              textAnchor: "middle",
+              dominantBaseline: "middle",
+              fill: selectedSilkText === ti ? COLORS.highlight : COLORS.silk,
+              fontSize: fontPx,
+              fontFamily: "monospace",
+              transform: `rotate(${-rotation} ${s.sx} ${s.sy})`,
+              opacity: 0.9,
+              style: { pointerEvents: "none" },
+            }, t.text);
+          }),
+
+          // Silk Label
+          adapter.silkLabel?.show && (() => {
+            const lp = transformPoint(adapter.silkLabel.x, adapter.silkLabel.y);
+            const s = toScreen(lp.x, lp.y);
+            const fontPx = Math.max((adapter.silkLabel.height || 1) * pxPerMm, 9);
+            return React.createElement(React.Fragment, null,
+              selectedSilkLabel && React.createElement("rect", {
+                x: s.sx - adapter.name.length * fontPx * 0.31,
+                y: s.sy - fontPx * 0.7,
+                width: adapter.name.length * fontPx * 0.62,
+                height: fontPx * 1.4,
+                fill: "none",
+                stroke: COLORS.highlight,
+                strokeWidth: 1,
+                strokeDasharray: "3 2",
+                rx: 2,
+              }),
+              React.createElement("text", {
+                x: s.sx, y: s.sy,
+                textAnchor: "middle", dominantBaseline: "middle",
+                fill: selectedSilkLabel ? COLORS.highlight : COLORS.silk,
+                fontSize: fontPx,
+                fontFamily: "monospace",
+                opacity: 0.9,
+                style: { pointerEvents: "none", userSelect: "none" },
+              }, adapter.name),
+            );
+          })(),
 
           // Active trace
           tool === "trace" && tracePoints.length > 0 && React.createElement("g", null,
@@ -448,13 +1597,48 @@ function AdapterEditor() {
         ),
       ),
 
-      // Code panel
+      // JSON Adapter-Auswahl Modal
+      showJsonSelect && React.createElement("div", {
+        style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
+        onClick: (e) => { if (e.target === e.currentTarget) setShowJsonSelect(false); },
+      },
+        React.createElement("div", { style: { background: COLORS.panelBg, border: `1px solid ${COLORS.panelBorder}`, borderRadius: 8, padding: 20, minWidth: 380, maxWidth: 520, maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 12 } },
+          React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            React.createElement("span", { style: { color: COLORS.accent, fontSize: 13, fontWeight: "bold" } }, "Adapter auswählen"),
+            React.createElement("button", { onClick: () => setShowJsonSelect(false), style: { ...btnStyle, padding: "2px 8px" } }, "✕"),
+          ),
+          React.createElement("div", { style: { fontSize: 10, color: COLORS.textDim } },
+            `${jsonSelectOptions.length} adapters found  – choose one to edit:`
+          ),
+          React.createElement("div", { style: { overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 } },
+            jsonSelectOptions.map((opt, i) =>
+              React.createElement("div", {
+                key: i,
+                onClick: () => loadJsonAdapter(opt),
+                style: { background: COLORS.btnBg, border: `1px solid ${COLORS.panelBorder}`, borderRadius: 4, padding: "8px 12px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 3 },
+                onMouseEnter: e => e.currentTarget.style.borderColor = COLORS.accent,
+                onMouseLeave: e => e.currentTarget.style.borderColor = COLORS.panelBorder,
+              },
+                React.createElement("span", { style: { color: COLORS.text, fontSize: 12, fontWeight: "bold" } }, opt.name || opt.id || `Adapter ${i + 1}`),
+                React.createElement("span", { style: { color: COLORS.textDim, fontSize: 10 } },
+                  `ID: ${opt.id || '–'} | Kategorie: ${opt.category || '–'} | ${opt.widthPins || '?'}×${opt.heightPins || '?'} Pins | Pitch: ${opt.pitch || '?'} mm`
+                ),
+              )
+            )
+          ),
+        )
+      ),
+
+      // JSON preview panel
       showCode && React.createElement("div", { style: { width: 420, borderLeft: `1px solid ${COLORS.panelBorder}`, background: COLORS.panelBg, display: "flex", flexDirection: "column" } },
         React.createElement("div", { style: { padding: "8px 12px", borderBottom: `1px solid ${COLORS.panelBorder}`, display: "flex", justifyContent: "space-between", alignItems: "center" } },
-          React.createElement("span", { style: { fontSize: 11, color: COLORS.accent } }, "GENERATED CODE"),
-          React.createElement("button", { onClick: () => { navigator.clipboard?.writeText(generateCode); }, style: btnStyle }, "📋 Copy"),
+          React.createElement("span", { style: { fontSize: 11, color: COLORS.accent } }, "JSON PREVIEW"),
+          React.createElement("div", { style: { display: "flex", gap: 4 } },
+            React.createElement("button", { onClick: () => { navigator.clipboard?.writeText(generateJson); }, style: btnStyle }, "📋 Copy"),
+            React.createElement("button", { onClick: downloadJson, style: { ...btnStyle, background: COLORS.accent } }, "💾 Download"),
+          ),
         ),
-        React.createElement("pre", { style: { flex: 1, margin: 0, padding: 12, overflow: "auto", fontSize: 10, lineHeight: 1.5, color: COLORS.text, whiteSpace: "pre-wrap" } }, generateCode),
+        React.createElement("pre", { style: { flex: 1, margin: 0, padding: 12, overflow: "auto", fontSize: 10, lineHeight: 1.5, color: COLORS.text, whiteSpace: "pre-wrap" } }, generateJson),
       ),
     )
   );
