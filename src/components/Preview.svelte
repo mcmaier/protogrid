@@ -1,7 +1,7 @@
 <script>
   import { computeGrid, generatePadPositions, generatePowerRailTraces, generateSignalTraces, computeMountingHoles, generateLabelStrokes, generateSilkLineSegments, getTraceWidth, MOUNT_KEEPOUT_MARGIN, isInKeepout } from '../lib/gerber.js';
   import { getRotatedModule, getModuleOverlayUrl, MODULE_LIBRARY, RESERVED_AREA_MODULE_ID } from '../lib/modules.js';
-  import { getAdapterForInstance, getAdapterOverlayUrl, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch, cycleVariableSubgridPadShape } from '../lib/adapters.js';
+  import { getAdapterForInstance, getAdapterOverlayUrl, getAllAdapters, ADAPTER_LIBRARY, VARIABLE_SUBGRID_ADAPTER_ID, cycleVariableSubgridPitch, cycleVariableSubgridPadShape } from '../lib/adapters.js';
   import { getTextStrokes } from '../lib/font.js';
   
   let { config = $bindable(), modules = $bindable(), adapters = $bindable(), selectedInstanceId, onSelect, signalTrackDrawMode = $bindable(), selectedSignalTrackIndex = null, onSelectSignalTrack, showAdapterOverlays = true, showModuleOverlays = true, silkLineDrawMode = $bindable(), selectedSilkLineIndex = null, onSelectSilkLine } = $props();
@@ -1098,7 +1098,7 @@
     {@const isSelected = selectedInstanceId === inst.id}
 
     {#if a}
-      {@const adpDef = ADAPTER_LIBRARY.find(ad => ad.id === inst.adapterId)}
+      {@const adpDef = getAllAdapters().find(ad => ad.id === inst.adapterId)}
       {@const adapterOverlayUrl = getAdapterOverlayUrl(adpDef)}
       {@const outW = a.def.outline?.width || (a.def.widthPins - 1) * a.pitch}
       {@const outH = a.def.outline?.height || (a.def.heightPins - 1) * a.pitch}
