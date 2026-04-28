@@ -370,7 +370,7 @@ function addModule() {
       <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/>
     </svg>
   </button>
-  <input bind:this={fileInput} type="file" accept=".json" style="display:none" onchange={handleAdapterFileUpload} />
+  <input bind:this={fileInput} type="file" accept=".json" class="hidden-file-input" onchange={handleAdapterFileUpload} />
 
   </div>
 
@@ -429,6 +429,10 @@ function addModule() {
 </div>
 
 <style>
+  .hidden-file-input {
+    display: none;
+  }
+
   .toolbar {
     display: flex;
     flex-direction: column;

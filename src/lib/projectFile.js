@@ -1,3 +1,5 @@
+import { validateAdapterDef } from './adapters.js';
+
 const PROJECT_FILE_TYPE = 'macgizmo.gridgen.project';
 const CURRENT_SCHEMA_VERSION = 1;
 const SOFTWARE_VERSION = __APP_VERSION__;
@@ -76,8 +78,8 @@ function sanitizePlacedItems(rawItems, key) {
       row: Math.max(0, Math.floor(toNumber(item.row, 0))),
       rotation: Math.max(0, Math.floor(toNumber(item.rotation, 0))) % 4,
       color: typeof item.color === 'string' ? item.color : '#ffffff',
-      widthPins: Math.max(2, Math.floor(toNumber(item.widthPins, 0))),
-      heightPins: Math.max(2, Math.floor(toNumber(item.heightPins, 0))),
+      widthPins: Math.max(1, Math.floor(toNumber(item.widthPins, 0))),
+      heightPins: Math.max(1, Math.floor(toNumber(item.heightPins, 0))),
       pitch: toNumber(item.pitch, 2).toFixed(2),
       subGridPitch: toNumber(item.subGridPitch, 2).toFixed(2),
       subPadSize: toNumber(item.subPadSize, 1),
@@ -124,7 +126,9 @@ export function parseProject(jsonText, defaults) {
   const isFutureVersion = schemaVersion > CURRENT_SCHEMA_VERSION;
 
   const rawCustomDefs = parsed.data.customAdapterDefs;
-  const customAdapterDefs = Array.isArray(rawCustomDefs) ? rawCustomDefs : [];
+  const customAdapterDefs = Array.isArray(rawCustomDefs)
+    ? rawCustomDefs.filter(item => validateAdapterDef(item) === null)
+    : [];
 
   return {
     schemaVersion,

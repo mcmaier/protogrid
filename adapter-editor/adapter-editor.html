@@ -1114,7 +1114,7 @@ function AdapterEditor() {
           React.createElement("textarea", { value: importText, onChange: e => setImportText(e.target.value), placeholder: "...or paste file content", rows: 4, style: { ...inputStyle, fontSize: 10, resize: "vertical" } }),
           React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
             React.createElement("button", { onClick: doImport, style: { ...btnStyle, background: COLORS.accent, color: "#fff" } }, "KiCad Mod"),
-            React.createElement("button", { onClick: () => {400
+            React.createElement("button", { onClick: () => {
               const parsed = parseKicadPcb(importText);
               if (parsed.error) { alert(parsed.error); return; }
               const result = kicadPcbToAdapter(parsed);

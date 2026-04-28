@@ -10,3 +10,9 @@
 *::after {
   box-sizing: border-box;
 }
+
+div:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden;
+}

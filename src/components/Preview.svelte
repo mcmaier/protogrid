@@ -1112,8 +1112,7 @@
       <g class="module-overlay adapter-overlay"
         class:dragging={dragging?.instanceId === inst.id}
         class:conflict={hasConflict}
-        onpointerdown={(e) => onItemPointerDown(e, inst, 'adapter')}
-        style="cursor: grab;">
+        onpointerdown={(e) => onItemPointerDown(e, inst, 'adapter')}>
 
         <!-- Selection highlight -->
         {#if isSelected}
@@ -1456,7 +1455,7 @@
           fill="transparent"
           stroke="none"
           onpointerdown={(e) => onItemPointerDown(e, inst, 'adapter')}
-          style="cursor: grab;"
+          class="adapter-overlay"
         />
 
         {#if inst.adapterId === VARIABLE_SUBGRID_ADAPTER_ID}
@@ -1622,5 +1621,9 @@
   
   .adapter-overlay:hover rect {
     fill-opacity: 0.9;
+  }
+
+  .adapter-overlay {
+    cursor: grab;
   }
 </style>

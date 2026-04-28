@@ -80,6 +80,7 @@ export function getAllAdapters() {
  * @returns {string|null}
  */
 export function validateAdapterDef(item) {
+  if (item == null || typeof item !== 'object') return 'Adapter must be a non-null object';
   if (typeof item.id !== 'string' || !item.id) return 'Missing or invalid "id"';
   if (typeof item.name !== 'string' || !item.name) return 'Missing or invalid "name"';
   if (typeof item.category !== 'string') return 'Missing "category"';

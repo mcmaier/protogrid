@@ -352,12 +352,6 @@ if (pendingPitch === config.pitch) return;
     background: #1f1f1f;
   }
 
-  :global(div:fullscreen) {
-    width: 100vw !important;
-    height: 100vh !important;
-    overflow: hidden;
-  }
-
   .ppp-app {
     width: 100%;
     padding: 20px;

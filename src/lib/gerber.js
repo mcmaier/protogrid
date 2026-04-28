@@ -863,7 +863,7 @@ export function generateCopperLayer(config, layerName = 'B.Cu', placedAdapters =
         } else {
         // Simple adapter: auto-generate SMD pad matrix for hand-soldering        
         const smdGridPitch = config.pitch;
-        const smdPadSize = Math.floor(smdGridPitch/2);
+        const smdPadSize = smdGridPitch / 2;
         const key = `S${smdPadSize.toFixed(4)}`;
         if (!rectApertures.has(key)) rectApertures.set(key, nextAperture++);
         const aperture = rectApertures.get(key);
@@ -1075,7 +1075,7 @@ export function generateSolderMask(config, layerName = 'B.Mask', placedAdapters 
         } else {
         // Simple adapter: auto-generate mask openings for SMD pad matrix
         const smdGridPitch = config.pitch;
-        const smdPadSize = Math.floor(smdGridPitch/2);
+        const smdPadSize = smdGridPitch / 2;
         const smdMaskSize = smdPadSize + maskExpansion * 2;
 
         const key = `S${smdMaskSize.toFixed(4)}`;
